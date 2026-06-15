@@ -2,7 +2,10 @@ package playback
 
 import (
 	"fmt"
+	"log"
 	"math/rand"
+	"os"
+	"path/filepath"
 )
 
 type Queue struct {
@@ -12,6 +15,9 @@ type Queue struct {
 }
 
 type QueueService interface {
+	ScanDir(DirPath string) []string
+	PopulateQueue()
+
 	Add(track Track)
 	Next() (Track, bool)
 	Prev() (Track, bool)
@@ -25,6 +31,37 @@ type QueueService interface {
 // Constructor
 func NewQueue() *Queue {
 	return &Queue{}
+}
+
+func (q *Queue) ScanDir(dir string) ([]Track, error) {
+
+	// Todo: Absolute/Full path from track or scan for particular name conventioal file something, argument or shii
+	dirPath := filepath.Join("..", "..", dir)
+	files, err := os.ReadDir(dirPath)
+	if err != nil {
+		return []Track{}, err
+	}
+
+	var tracks []Track
+
+	for _, file := range files {
+		if !file.IsDir() {
+			tracks = append(tracks, Track{Path: file.Name()})
+		}
+	}
+	return tracks, nil
+}
+
+func (q *Queue) PopulateQueue(dir string) {
+	tracks, err := q.ScanDir(dir)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, t := range tracks {
+		fmt.Printf("\n- %v  Added", t.Path)
+		q.Add(t)
+	}
 }
 
 func (q *Queue) Add(track Track) {
@@ -73,9 +110,9 @@ func (q *Queue) List() []Track {
 	return result
 }
 
-func (q *Queue) PrintList() {
+func (q *Queue) PrintTracksInQueue() {
 	tracks := q.List()
-	fmt.Println("\n>> Tracks")
+	fmt.Println("\n\n>> Tracks")
 	for idx, tracks := range tracks {
 		track := tracks.Path
 		fmt.Printf("\n   %v  %v", idx, track)

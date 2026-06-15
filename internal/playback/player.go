@@ -47,8 +47,9 @@ func (p *Player) Load(track Track) error {
 	if p.streamer != nil {
 		p.streamer.Close()
 	}
-
-	path := filepath.Join("..", "..", "Music", "shiv2.mp3")
+	
+	// Todo: Absolute/Full path from track or scan for particular name conventioal file something, argument or shii
+	path := filepath.Join("..", "..", "Music", track.Path)
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -63,13 +64,14 @@ func (p *Player) Load(track Track) error {
 	p.format = format
 	p.track = &track
 	p.state = Stopped
-	fmt.Printf("File %v loaded", track.Path)
+	fmt.Println("")
+	fmt.Printf("\nFile %v loaded", track.Path)
 	return nil
 }
 
 func (p *Player) Wait() {
 	if p.done != nil {
-		<-p.done
+		<-p.done 	// unblock
 	}
 }
 
@@ -131,7 +133,7 @@ func (p *Player) Position() time.Duration {
 	if p.streamer == nil {
 		return 0
 	}
-	return time.Duration(p.streamer.Position())
+	return p.format.SampleRate.D(p.streamer.Position())
 }
 
 func (p *Player) State() PlaybackState {
