@@ -59,7 +59,6 @@ func (q *Queue) PopulateQueue(dir string) {
 	}
 
 	for _, t := range tracks {
-		fmt.Printf("\n- %v  Added", t.Path)
 		q.Add(t)
 	}
 }

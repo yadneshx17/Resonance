@@ -1,13 +1,11 @@
 package main
 
 import (
-	"fmt"
-
-	"github.com/yadneshx17/resonance/internal/playback"
+	"github.com/yadneshx17/resonance/internal/tui"
 )
 
 func main() {
-	player := playback.NewPlayer()
+	// player := playback.NewPlayer()
 	// player.Load(playback.Track{Path: "shiv2.mp3"})
 	// player.Play()
 
@@ -15,8 +13,8 @@ func main() {
 	// player.Pause()
 	// fmt.Println("[-] Paused")
 
-	posi := player.Position()
-	fmt.Printf("Posi: %v", posi.Seconds())
+	// posi := player.Position()
+	// fmt.Printf("Posi: %v", posi.Seconds())
 
 	// time.Sleep(5 * time.Second)
 	// player.Resume()
@@ -67,7 +65,9 @@ func main() {
 	// -------------------------------------------------------------
 	// Scan Dir
 
-	queue := playback.NewQueue()
-	queue.PopulateQueue("Music")
-	queue.PrintTracksInQueue()
+	// 	queue := playback.NewQueue()
+	// 	queue.PopulateQueue("Music")
+	// 	queue.PrintTracksInQueue()
+
+	tui.Run()
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/gopxl/beep"
@@ -13,12 +14,13 @@ import (
 
 // Stores the loaded audio and current state
 type Player struct {
-	streamer beep.StreamSeekCloser // decoded audio + ( Close, Seek, Position )
-	format   beep.Format           // sample rate info
-	ctrl     *beep.Ctrl            // enables pause/resume
-	state    PlaybackState
-	track    *Track
-	done     chan struct{}
+	streamer  beep.StreamSeekCloser // decoded audio + ( Close, Seek, Position )
+	format    beep.Format           // sample rate info
+	ctrl      *beep.Ctrl            // enables pause/resume
+	state     PlaybackState
+	track     *Track
+	done      chan struct{}
+	closeOnce sync.Once				// fixes: panic closing closed channel
 }
 
 type AudioEngine interface {
@@ -47,7 +49,7 @@ func (p *Player) Load(track Track) error {
 	if p.streamer != nil {
 		p.streamer.Close()
 	}
-	
+
 	// Todo: Absolute/Full path from track or scan for particular name conventioal file something, argument or shii
 	path := filepath.Join("..", "..", "Music", track.Path)
 	f, err := os.Open(path)
@@ -64,14 +66,12 @@ func (p *Player) Load(track Track) error {
 	p.format = format
 	p.track = &track
 	p.state = Stopped
-	fmt.Println("")
-	fmt.Printf("\nFile %v loaded", track.Path)
 	return nil
 }
 
 func (p *Player) Wait() {
 	if p.done != nil {
-		<-p.done 	// unblock
+		<-p.done // unblock
 	}
 }
 
@@ -80,16 +80,20 @@ func (p *Player) Play() error {
 		return fmt.Errorf("no track loaded")
 	}
 
+	// fix: This should be decoupled and Init at application startup and not for every song.
 	speaker.Init(p.format.SampleRate, p.format.SampleRate.N(time.Second/10))
 
 	p.ctrl = &beep.Ctrl{Streamer: p.streamer, Paused: false}
+	p.closeOnce = sync.Once{}
 	p.done = make(chan struct{})
 
-	speaker.Play(beep.Seq(p.ctrl, beep.Callback(func() { close(p.done) })))
+	done := p.done
+	speaker.Play(beep.Seq(p.ctrl, beep.Callback(func() { 
+		NewQueue().Next()
+		close(done) 
+	})))
 
 	p.state = Playing
-
-	fmt.Println("\nPlaying...")
 	return nil
 }
 
@@ -117,7 +121,8 @@ func (p *Player) Stop() error {
 	if p.streamer != nil {
 		p.streamer.Seek(0) // reset position
 	}
-	close(p.done)
+
+	p.closeOnce.Do(func() { close(p.done) })
 	return nil
 }
 
