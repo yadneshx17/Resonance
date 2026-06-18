@@ -20,7 +20,7 @@ type Player struct {
 	state     PlaybackState
 	track     *Track
 	done      chan struct{}
-	closeOnce sync.Once				// fixes: panic closing closed channel
+	closeOnce sync.Once // fixes: panic closing closed channel
 }
 
 type AudioEngine interface {
@@ -43,6 +43,13 @@ func NewPlayer() *Player {
 	return &Player{
 		state: Stopped,
 	}
+}
+
+func (p *Player) CurrentTrack() Track {
+    if p.track == nil {
+        return Track{}
+    }
+    return *p.track
 }
 
 func (p *Player) Load(track Track) error {
@@ -88,9 +95,8 @@ func (p *Player) Play() error {
 	p.done = make(chan struct{})
 
 	done := p.done
-	speaker.Play(beep.Seq(p.ctrl, beep.Callback(func() { 
-		NewQueue().Next()
-		close(done) 
+	speaker.Play(beep.Seq(p.ctrl, beep.Callback(func() {
+		close(done)
 	})))
 
 	p.state = Playing

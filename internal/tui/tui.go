@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/yadneshx17/resonance/internal/playback"
@@ -10,15 +11,16 @@ import (
 
 // Holds everything visible on screen
 type model struct {
-	player *playback.Player
-	queue  *playback.Queue
-	cursor int // which queue item is selected
-	// checked       int
-	width, height int // terminal size
+	player        *playback.Player
+	queue         *playback.Queue
+	cursor        int // which queue item is selected
+	playingID     int // increments on each play, filters stale songEndedMsg
+	width, height int
 }
 
 type (
-	songEndedMsg struct{}
+	tickMsg      time.Time
+	songEndedMsg struct{ id int }
 )
 
 func Run() {
@@ -41,9 +43,8 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) { // what is this
+	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		// fmt.Printf("KEY: %s cursor=%d\n", msg.String(), m.cursor)
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -56,34 +57,97 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 			}
 		case "enter":
+			m.playingID++
 			tracks := m.queue.List()
 			if m.cursor >= len(tracks) {
 				return m, nil
 			}
-
 			track := tracks[m.cursor]
-
 			if err := m.player.Load(track); err != nil {
 				return m, nil
 			}
-
 			m.player.Play()
-
-			return m, nil
+			return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
 		case " ", "space":
 			if m.player.State() == playback.Playing {
 				m.player.Pause()
 			} else {
 				m.player.Resume()
 			}
+		case "n":
+			m.playingID++
+			m.player.Stop()
+			m.cursor = (m.cursor + 1) % m.queue.Len()
+			tracks := m.queue.List()
+			track := tracks[m.cursor]
+			m.player.Load(track)
+			m.player.Play()
+			return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
+		case "p":
+			m.playingID++
+			m.player.Stop()
+			m.cursor--
+			if m.cursor < 0 {
+				m.cursor = m.queue.Len() - 1
+			}
+			tracks := m.queue.List()
+			track := tracks[m.cursor]
+			m.player.Load(track)
+			m.player.Play()
+			return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
 		}
+
+	case tickMsg:
+		return m, tick()
+
+	case songEndedMsg:
+		if msg.id != m.playingID {
+			return m, nil
+		}
+		m.playingID++
+		m.cursor = (m.cursor + 1) % m.queue.Len()
+
+		// plays next song
+		tracks := m.queue.List()
+		track := tracks[m.cursor]
+		m.player.Load(track)
+		m.player.Play()
+		return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
 	}
 	return m, nil
 }
 
+func waitForSongEnd(player *playback.Player, id int) tea.Cmd {
+	return func() tea.Msg {
+		player.Wait()
+		return songEndedMsg{id: id}
+	}
+}
+
+func tick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
+
 func (m model) View() tea.View {
 	var s string
-	s += "Resonance\n\nQueue: \n"
+	s += "Resonance\n\n"
+
+	// Now Playing section
+	track := m.player.CurrentTrack()
+	if track.Path != "" {
+		state := "▶ Playing"
+		if m.player.State() == playback.Paused {
+			state = "|| Paused"
+		}
+		s += fmt.Sprintf("Now Playing: %s  %s\n", track.Path, state)
+		pos := m.player.Position()
+		s += fmt.Sprintf("  %v\n", pos.Round(time.Second))
+		s += "────────────────────────\n\n"
+	}
+
+	s += "Queue:\n"
 	if m.queue.Len() > 0 {
 		if m.cursor >= m.queue.Len() {
 			m.cursor = m.queue.Len() - 1
@@ -102,7 +166,7 @@ func (m model) View() tea.View {
 		s += fmt.Sprintf(" %s %s\n", c, t.Path)
 	}
 
-	s += "\n Enter:Play Space:Pause q:Quit"
+	s += "\n\n Enter:Play Space:Pause q:Quit n:Next p:Previous"
 
 	v := tea.NewView(s)
 	// v.AltScreen = true // why ?
