@@ -140,6 +140,13 @@ func (p *Player) Seek(position time.Duration) error {
 	return p.streamer.Seek(posi)
 }
 
+func (p *Player) Duration() time.Duration {
+	if p.streamer == nil {
+		return 0
+	}
+	return p.format.SampleRate.D(p.streamer.Len())
+}
+
 func (p *Player) Position() time.Duration {
 	if p.streamer == nil {
 		return 0

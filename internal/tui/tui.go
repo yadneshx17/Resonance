@@ -9,6 +9,13 @@ import (
 	"github.com/yadneshx17/resonance/internal/playback"
 )
 
+func fmtDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	m := int(d.Minutes())
+	s := int(d.Seconds()) % 60
+	return fmt.Sprintf("%d:%02d", m, s)
+}
+
 // Holds everything visible on screen
 type model struct {
 	player        *playback.Player
@@ -143,7 +150,8 @@ func (m model) View() tea.View {
 		}
 		s += fmt.Sprintf("Now Playing: %s  %s\n", track.Path, state)
 		pos := m.player.Position()
-		s += fmt.Sprintf("  %v\n", pos.Round(time.Second))
+		dur := m.player.Duration()
+		s += fmt.Sprintf("  %s / %s\n", fmtDuration(pos), fmtDuration(dur))
 		s += "────────────────────────\n\n"
 	}
 
