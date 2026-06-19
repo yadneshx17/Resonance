@@ -128,7 +128,11 @@ func (p *Player) Stop() error {
 		p.streamer.Seek(0) // reset position
 	}
 
-	p.closeOnce.Do(func() { close(p.done) })
+	p.closeOnce.Do(func() {
+		if p.done != nil {
+			close(p.done)
+		}
+	})
 	return nil
 }
 

@@ -3,10 +3,43 @@ package tui
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/yadneshx17/resonance/internal/playback"
+)
+
+var (
+	panelStyle = lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			Padding(0, 1)
+
+	activePanelStyle = lipgloss.NewStyle().
+				Border(lipgloss.NormalBorder()).
+				BorderForeground(lipgloss.Color("#7D56F4")).
+				Padding(0, 1)
+
+	headerStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#7D56F4"))
+
+	playingIconStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#00FF00"))
+
+	pausedIconStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFD700"))
+
+	playingTrackStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#20002F")).
+				Background(lipgloss.Color("#F5F5DC"))
+
+	cursorStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#FFD700"))
 )
 
 func fmtDuration(d time.Duration) string {
@@ -35,13 +68,18 @@ func progressBar(pos, dur time.Duration, width int) string {
 	return bar
 }
 
-// Holds everything visible on screen
 type model struct {
-	player        *playback.Player
-	queue         *playback.Queue
-	cursor        int // which queue item is selected
-	playingID     int // increments on each play, filters stale songEndedMsg
-	width, height int
+	player      *playback.Player
+	library     []playback.Track
+	queue       *playback.Queue
+	libCursor   int
+	queueCursor int
+	libOffset   int
+	queueOffset int
+	active      string
+	playingID   int
+	errMsg string
+	height int
 }
 
 type (
@@ -51,11 +89,17 @@ type (
 
 func Run() {
 	q := playback.NewQueue()
-	q.PopulateQueue("Music")
+	lib, err := q.ScanDir("Music")
+	if err != nil {
+		fmt.Printf("Error scanning: %v", err)
+		os.Exit(1)
+	}
 
 	p := tea.NewProgram(model{
-		player: playback.NewPlayer(),
-		queue:  q,
+		player:  playback.NewPlayer(),
+		library: lib,
+		queue:   q,
+		active:  "library",
 	})
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)
@@ -63,64 +107,164 @@ func Run() {
 	}
 }
 
-// runs after model is created.
 func (m model) Init() tea.Cmd {
 	return nil
 }
 
+func (m model) visibleRows() int {
+	if m.height == 0 {
+		return 10
+	}
+	overhead := 4 // panel borders + header + separator
+	overhead += 1 // gap after panels
+	overhead += 1 // controls help
+	if m.player.CurrentTrack().Path != "" {
+		overhead += 2 // now-playing + gap after it
+	}
+	rows := m.height - overhead
+	if rows < 1 {
+		rows = 1
+	}
+	return rows
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.height = msg.Height
+
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
+		case "tab":
+			if m.active == "library" {
+				m.active = "queue"
+			} else {
+				m.active = "library"
+			}
+		case "left":
+			m.active = "library"
+		case "right":
+			m.active = "queue"
 		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
+			if m.active == "library" {
+				if m.libCursor > 0 {
+					m.libCursor--
+				}
+				if m.libCursor < m.libOffset {
+					m.libOffset = m.libCursor
+				}
+			} else if m.queueCursor > 0 {
+				m.queueCursor--
+				if m.queueCursor < m.queueOffset {
+					m.queueOffset = m.queueCursor
+				}
 			}
 		case "down", "j":
-			if m.cursor < m.queue.Len()-1 {
-				m.cursor++
+			vis := m.visibleRows()
+			if m.active == "library" {
+				if m.libCursor < len(m.library)-1 {
+					m.libCursor++
+				}
+				if m.libCursor >= m.libOffset+vis {
+					m.libOffset = m.libCursor - vis + 1
+				}
+			} else if m.queueCursor < m.queue.Len()-1 {
+				m.queueCursor++
+				if m.queueCursor >= m.queueOffset+vis {
+					m.queueOffset = m.queueCursor - vis + 1
+				}
+			}
+		case "a":
+			if m.active == "library" && len(m.library) > 0 {
+				m.queue.Add(m.library[m.libCursor])
+			}
+		case "A":
+			if m.active == "library" && len(m.library) > 0 {
+				for _, t := range m.library {
+					m.queue.Add(t)
+				}
+			}
+		case "d":
+			if m.active == "queue" && m.queue.Len() > 0 {
+				m.queue.Remove(m.queueCursor)
+				if m.queueCursor >= m.queue.Len() {
+					m.queueCursor = max(0, m.queue.Len()-1)
+				}
+				if m.queueOffset >= m.queue.Len() {
+					m.queueOffset = max(0, m.queue.Len()-1)
+				}
 			}
 		case "enter":
-			m.playingID++
-			tracks := m.queue.List()
-			if m.cursor >= len(tracks) {
-				return m, nil
+			if m.active == "queue" && m.queue.Len() > 0 {
+				m.playingID++
+				m.errMsg = ""
+				m.player.Stop()
+				m.queue.SetCurrent(m.queueCursor)
+				vis := m.visibleRows()
+				if m.queueCursor < m.queueOffset {
+					m.queueOffset = m.queueCursor
+				} else if m.queueCursor >= m.queueOffset+vis {
+					m.queueOffset = m.queueCursor - vis + 1
+				}
+				tracks := m.queue.List()
+				track := tracks[m.queueCursor]
+				if err := m.player.Load(track); err != nil {
+					m.errMsg = fmt.Sprintf("Error: %v", err)
+					return m, nil
+				}
+				m.player.Play()
+				return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
 			}
-			track := tracks[m.cursor]
-			if err := m.player.Load(track); err != nil {
-				return m, nil
-			}
-			m.player.Play()
-			return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
 		case " ", "space":
 			if m.player.State() == playback.Playing {
 				m.player.Pause()
-			} else {
+			} else if m.player.State() == playback.Paused {
 				m.player.Resume()
 			}
 		case "n":
-			m.playingID++
-			m.player.Stop()
-			m.cursor = (m.cursor + 1) % m.queue.Len()
-			tracks := m.queue.List()
-			track := tracks[m.cursor]
-			m.player.Load(track)
-			m.player.Play()
-			return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
-		case "p":
-			m.playingID++
-			m.player.Stop()
-			m.cursor--
-			if m.cursor < 0 {
-				m.cursor = m.queue.Len() - 1
+			if m.queue.Len() > 0 {
+				m.playingID++
+				m.errMsg = ""
+				m.player.Stop()
+				m.queueCursor = (m.queueCursor + 1) % m.queue.Len()
+				m.queue.SetCurrent(m.queueCursor)
+				vis := m.visibleRows()
+				if m.queueCursor >= m.queueOffset+vis {
+					m.queueOffset = m.queueCursor - vis + 1
+				}
+				tracks := m.queue.List()
+				track := tracks[m.queueCursor]
+				if err := m.player.Load(track); err != nil {
+					m.errMsg = fmt.Sprintf("Error: %v", err)
+					return m, nil
+				}
+				m.player.Play()
+				return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
 			}
-			tracks := m.queue.List()
-			track := tracks[m.cursor]
-			m.player.Load(track)
-			m.player.Play()
-			return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
+		case "p":
+			if m.queue.Len() > 0 {
+				m.playingID++
+				m.errMsg = ""
+				m.player.Stop()
+				m.queueCursor--
+				if m.queueCursor < 0 {
+					m.queueCursor = m.queue.Len() - 1
+				}
+				m.queue.SetCurrent(m.queueCursor)
+				if m.queueCursor < m.queueOffset {
+					m.queueOffset = m.queueCursor
+				}
+				tracks := m.queue.List()
+				track := tracks[m.queueCursor]
+				if err := m.player.Load(track); err != nil {
+					m.errMsg = fmt.Sprintf("Error: %v", err)
+					return m, nil
+				}
+				m.player.Play()
+				return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
+			}
 		}
 
 	case tickMsg:
@@ -130,12 +274,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.id != m.playingID {
 			return m, nil
 		}
+		if m.queue.Len() == 0 {
+			return m, nil
+		}
 		m.playingID++
-		m.cursor = (m.cursor + 1) % m.queue.Len()
+		m.queueCursor = (m.queueCursor + 1) % m.queue.Len()
+		m.queue.SetCurrent(m.queueCursor)
+		vis := m.visibleRows()
+		if m.queueCursor >= m.queueOffset+vis {
+			m.queueOffset = m.queueCursor - vis + 1
+		}
 
-		// plays next song
 		tracks := m.queue.List()
-		track := tracks[m.cursor]
+		track := tracks[m.queueCursor]
 		m.player.Load(track)
 		m.player.Play()
 		return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
@@ -156,49 +307,149 @@ func tick() tea.Cmd {
 	})
 }
 
+func (m model) renderNowPlaying() string {
+	currtrack := m.player.CurrentTrack()
+	if currtrack.Path == "" {
+		return ""
+	}
+
+	var icon string
+	switch m.player.State() {
+	case playback.Playing:
+		icon = playingIconStyle.Render("▶")
+	case playback.Paused:
+		icon = pausedIconStyle.Render("||")
+	default:
+		icon = "♫"
+	}
+
+	barWidth := 20
+	pos := m.player.Position()
+	dur := m.player.Duration()
+	bar := progressBar(pos, dur, barWidth)
+	t := fmt.Sprintf("%s / %s", fmtDuration(pos), fmtDuration(dur))
+
+	return fmt.Sprintf("%s %s  %s  %s", icon, currtrack.Path, bar, t)
+}
+
+func (m model) buildLibBlock(slice []playback.Track, offset int) string {
+	var s string
+	s += headerStyle.Render("Library") + "\n"
+	s += "────────\n"
+	if len(slice) == 0 {
+		s += "No matching tracks\n"
+	} else {
+		for i, t := range slice {
+			idx := offset + i
+			prefix := " "
+			if m.active == "library" && m.libCursor == idx {
+				prefix = cursorStyle.Render(">")
+			}
+			s += fmt.Sprintf("%s %s\n", prefix, t.Path)
+		}
+	}
+	return s
+}
+
+func (m model) buildQueueBlock(slice []playback.Track, offset int) string {
+	playingIdx := m.queue.CurrentIndex()
+	var s string
+	s += headerStyle.Render("Queue") + "\n"
+	s += "─────\n"
+	for i, t := range slice {
+		idx := offset + i
+		line := fmt.Sprintf("  %s", t.Path)
+		if idx == playingIdx && m.player.State() != playback.Stopped {
+			line = playingTrackStyle.Render(fmt.Sprintf("▶ %s", t.Path))
+		} else if m.active == "queue" && m.queueCursor == idx {
+			line = cursorStyle.Render(fmt.Sprintf("> %s", t.Path))
+		}
+		s += line + "\n"
+	}
+	return s
+}
+
+func (m model) renderColumns() string {
+	vis := m.visibleRows()
+	lib := m.library
+
+	libLen := len(lib)
+	if m.libOffset > libLen-vis && libLen > vis {
+		m.libOffset = libLen - vis
+	}
+	if m.libOffset < 0 {
+		m.libOffset = 0
+	}
+
+	libSlice := lib
+	libOffset := 0
+	if libLen > vis {
+		libSlice = lib[m.libOffset : m.libOffset+vis]
+		libOffset = m.libOffset
+	}
+
+	queueLen := m.queue.Len()
+	if m.queueOffset > queueLen-vis && queueLen > vis {
+		m.queueOffset = queueLen - vis
+	}
+	if m.queueOffset < 0 {
+		m.queueOffset = 0
+	}
+
+	queueSlice := m.queue.List()
+	queueOffset := 0
+	if queueLen > vis {
+		queueSlice = queueSlice[m.queueOffset : m.queueOffset+vis]
+		queueOffset = m.queueOffset
+	}
+
+	libContent := m.buildLibBlock(libSlice, libOffset)
+	queueContent := m.buildQueueBlock(queueSlice, queueOffset)
+
+	libLines := strings.Split(libContent, "\n")
+	queueLines := strings.Split(queueContent, "\n")
+
+	maxLines := max(len(libLines), len(queueLines))
+	for len(libLines) < maxLines {
+		libLines = append(libLines, "")
+	}
+	for len(queueLines) < maxLines {
+		queueLines = append(queueLines, "")
+	}
+
+	libJoined := strings.Join(libLines, "\n")
+	queueJoined := strings.Join(queueLines, "\n")
+
+	if m.active == "library" {
+		libJoined = activePanelStyle.Render(libJoined)
+		queueJoined = panelStyle.Render(queueJoined)
+	} else {
+		libJoined = panelStyle.Render(libJoined)
+		queueJoined = activePanelStyle.Render(queueJoined)
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, libJoined, queueJoined)
+}
+
 func (m model) View() tea.View {
 	var s string
-	s += "\nResonance\n\n"
 
-	// Now Playing section
-	track := m.player.CurrentTrack()
-	if track.Path != "" {
-		switch m.player.State() {
-		case playback.Paused:
-			s += "|| "
-		default:
-			s += "♫ "
-
-		}
-		barWidth := 20
-		pos := m.player.Position()
-		dur := m.player.Duration()
-		s += fmt.Sprintf("%s %s / %s\n", progressBar(pos, dur, barWidth), fmtDuration(pos), fmtDuration(dur))
+	if np := m.renderNowPlaying(); np != "" {
+		s += np + "\n\n"
 	}
 
-	s += "Queue:\n"
-	if m.queue.Len() > 0 {
-		if m.cursor >= m.queue.Len() {
-			m.cursor = m.queue.Len() - 1
-		}
+	s += m.renderColumns()
+	s += "\n"
 
-		if m.cursor < 0 {
-			m.cursor = 0
-		}
+	help := "n:Next  p:Prev  Space  a:Add  A:AddAll  d:Remove  ←→Tab:Switch  Enter:Play  q:Quit"
+	if m.queue.Len() == 0 && m.player.State() == playback.Stopped {
+		help = "a:Add  A:AddAll  ←→Tab:Switch  q:Quit  (queue empty)"
 	}
-	for i, t := range m.queue.List() {
-		c := " "
-		if m.cursor == i {
-			c = ">"
-		}
+	s += help
 
-		s += fmt.Sprintf(" %s %s\n", c, t.Path)
+	if m.errMsg != "" {
+		s += "\n" + m.errMsg
 	}
 
-	s += "\n\n Enter:Play Space:Pause q:Quit n:Next p:Previous"
-
-	v := tea.NewView(s)
-	// v.AltScreen = true // why ?
-
-	return v
+	return tea.NewView(s)
 }

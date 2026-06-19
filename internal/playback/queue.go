@@ -2,70 +2,24 @@ package playback
 
 import (
 	"fmt"
-	"log"
 	"math/rand"
 	"os"
 	"path/filepath"
+
+	"github.com/gopxl/beep/mp3"
 )
 
 type Queue struct {
-	tracks    []Track
-	current   int
-	playOrder []int
+	tracks  []Track
+	current int
 }
 
-type QueueService interface {
-	ScanDir(DirPath string) []string
-	PopulateQueue()
-
-	Add(track Track)
-	Next() (Track, bool)
-	Prev() (Track, bool)
-	Current() (Track, bool)
-	Len() int
-	Clear()
-	List() []Track
-	Shuffle()
-}
-
-// Constructor
 func NewQueue() *Queue {
 	return &Queue{}
 }
 
-func (q *Queue) ScanDir(dir string) ([]Track, error) {
-
-	// Todo: Absolute/Full path from track or scan for particular name conventioal file something, argument or shii
-	dirPath := filepath.Join("..", "..", dir)
-	files, err := os.ReadDir(dirPath)
-	if err != nil {
-		return []Track{}, err
-	}
-
-	var tracks []Track
-
-	for _, file := range files {
-		if !file.IsDir() {
-			tracks = append(tracks, Track{Path: file.Name()})
-		}
-	}
-	return tracks, nil
-}
-
-func (q *Queue) PopulateQueue(dir string) {
-	tracks, err := q.ScanDir(dir)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	for _, t := range tracks {
-		q.Add(t)
-	}
-}
-
 func (q *Queue) Add(track Track) {
 	q.tracks = append(q.tracks, track)
-	q.playOrder = append(q.playOrder, len(q.tracks)-1)
 }
 
 func (q *Queue) Next() (Track, bool) {
@@ -73,7 +27,7 @@ func (q *Queue) Next() (Track, bool) {
 		return Track{}, false
 	}
 	q.current++
-	return q.tracks[q.playOrder[q.current]], true
+	return q.tracks[q.current], true
 }
 
 func (q *Queue) Prev() (Track, bool) {
@@ -81,14 +35,32 @@ func (q *Queue) Prev() (Track, bool) {
 		return Track{}, false
 	}
 	q.current--
-	return q.tracks[q.playOrder[q.current]], true
+	return q.tracks[q.current], true
 }
 
 func (q *Queue) Current() (Track, bool) {
 	if len(q.tracks) == 0 {
 		return Track{}, false
 	}
-	return q.tracks[q.playOrder[q.current]], true
+	return q.tracks[q.current], true
+}
+
+func (q *Queue) SetCurrent(i int) {
+	if i >= 0 && i < len(q.tracks) {
+		q.current = i
+	}
+}
+
+func (q *Queue) Remove(i int) {
+	if i < 0 || i >= len(q.tracks) {
+		return
+	}
+	q.tracks = append(q.tracks[:i], q.tracks[i+1:]...)
+	if i < q.current {
+		q.current--
+	} else if q.current >= len(q.tracks) {
+		q.current = max(0, len(q.tracks)-1)
+	}
 }
 
 func (q *Queue) Len() int {
@@ -97,30 +69,53 @@ func (q *Queue) Len() int {
 
 func (q *Queue) Clear() {
 	q.tracks = nil
-	q.playOrder = nil
 	q.current = 0
 }
 
 func (q *Queue) List() []Track {
 	result := make([]Track, len(q.tracks))
-	for i, idx := range q.playOrder {
-		result[i] = q.tracks[idx]
-	}
+	copy(result, q.tracks)
 	return result
 }
 
-func (q *Queue) PrintTracksInQueue() {
-	tracks := q.List()
-	fmt.Println("\n\n>> Tracks")
-	for idx, tracks := range tracks {
-		track := tracks.Path
-		fmt.Printf("\n   %v  %v", idx, track)
-	}
+func (q *Queue) CurrentIndex() int {
+	return q.current
 }
 
 func (q *Queue) Shuffle() {
-	for i := range q.playOrder {
-		j := i + int(rand.Intn(len(q.playOrder)-i))
-		q.playOrder[i], q.playOrder[j] = q.playOrder[j], q.playOrder[i]
+	rand.Shuffle(len(q.tracks), func(i, j int) {
+		q.tracks[i], q.tracks[j] = q.tracks[j], q.tracks[i]
+	})
+}
+
+func (q *Queue) ScanDir(dir string) ([]Track, error) {
+	dirPath := filepath.Join("..", "..", dir)
+	files, err := os.ReadDir(dirPath)
+	if err != nil {
+		return []Track{}, err
 	}
+
+	var tracks []Track
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+
+		fpath := filepath.Join(dirPath, file.Name())
+		f, err := os.Open(fpath)
+		if err != nil {
+			continue
+		}
+
+		_, _, err = mp3.Decode(f)
+		if err != nil {
+			f.Close()
+			fmt.Printf("\nSkipping %s: %v", file.Name(), err)
+			continue
+		}
+		f.Close()
+
+		tracks = append(tracks, Track{Path: file.Name()})
+	}
+	return tracks, nil
 }
