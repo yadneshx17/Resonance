@@ -16,6 +16,25 @@ func fmtDuration(d time.Duration) string {
 	return fmt.Sprintf("%d:%02d", m, s)
 }
 
+func progressBar(pos, dur time.Duration, width int) string {
+	if dur == 0 {
+		return ""
+	}
+	filled := int(float64(pos) / float64(dur) * float64(width))
+	if filled > width {
+		filled = width
+	}
+	bar := ""
+	for i := 0; i < width; i++ {
+		if i < filled {
+			bar += "█"
+		} else {
+			bar += "░"
+		}
+	}
+	return bar
+}
+
 // Holds everything visible on screen
 type model struct {
 	player        *playback.Player
@@ -139,20 +158,22 @@ func tick() tea.Cmd {
 
 func (m model) View() tea.View {
 	var s string
-	s += "Resonance\n\n"
+	s += "\nResonance\n\n"
 
 	// Now Playing section
 	track := m.player.CurrentTrack()
 	if track.Path != "" {
-		state := "▶ Playing"
-		if m.player.State() == playback.Paused {
-			state = "|| Paused"
+		switch m.player.State() {
+		case playback.Paused:
+			s += "|| "
+		default:
+			s += "♫ "
+
 		}
-		s += fmt.Sprintf("Now Playing: %s  %s\n", track.Path, state)
+		barWidth := 20
 		pos := m.player.Position()
 		dur := m.player.Duration()
-		s += fmt.Sprintf("  %s / %s\n", fmtDuration(pos), fmtDuration(dur))
-		s += "────────────────────────\n\n"
+		s += fmt.Sprintf("%s %s / %s\n", progressBar(pos, dur, barWidth), fmtDuration(pos), fmtDuration(dur))
 	}
 
 	s += "Queue:\n"
