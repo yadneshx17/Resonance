@@ -265,6 +265,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.player.Play()
 				return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
 			}
+		case "[":
+			m.player.SetVolume(-0.1)
+		case "]":
+			m.player.SetVolume(0.1)
+		case "m":
+			if m.player.IsMuted() {
+				m.player.Unmute()
+			} else {
+				m.player.Mute()
+			}
 		}
 
 	case tickMsg:
@@ -329,7 +339,19 @@ func (m model) renderNowPlaying() string {
 	bar := progressBar(pos, dur, barWidth)
 	t := fmt.Sprintf("%s / %s", fmtDuration(pos), fmtDuration(dur))
 
-	return fmt.Sprintf("%s %s  %s  %s", icon, currtrack.Path, bar, t)
+	vol := m.player.Volume()
+	volPct := int((vol + 3) / 6 * 100)
+	if volPct < 0 {
+		volPct = 0
+	} else if volPct > 100 {
+		volPct = 100
+	}
+	volStr := fmt.Sprintf("vol:%d%%", volPct)
+	if m.player.IsMuted() {
+		volStr = "🔇 muted"
+	}
+
+	return fmt.Sprintf("%s %s  %s  %s  %s", icon, currtrack.Path, bar, t, volStr)
 }
 
 func (m model) buildLibBlock(slice []playback.Track, offset int) string {
@@ -441,7 +463,7 @@ func (m model) View() tea.View {
 	s += m.renderColumns()
 	s += "\n"
 
-	help := "n:Next  p:Prev  Space  a:Add  A:AddAll  d:Remove  ←→Tab:Switch  Enter:Play  q:Quit"
+	help := "n:Next  p:Prev  Space  a:Add  A:AddAll  d:Remove  [:Vol-  ]:Vol+  m:Mute  ←→Tab:Switch  Enter:Play  q:Quit"
 	if m.queue.Len() == 0 && m.player.State() == playback.Stopped {
 		help = "a:Add  A:AddAll  ←→Tab:Switch  q:Quit  (queue empty)"
 	}
