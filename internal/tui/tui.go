@@ -69,6 +69,11 @@ func progressBar(pos, dur time.Duration, width int) string {
 	return bar
 }
 
+const (
+	setupWelcome = iota
+	setupInput
+)
+
 type model struct {
 	player      *playback.Player
 	library     []playback.Track
@@ -79,8 +84,12 @@ type model struct {
 	queueOffset int
 	active      string
 	playingID   int
-	errMsg string
-	height int
+	errMsg      string
+	height      int
+
+	setup      bool
+	setupState int
+	setupInput string
 }
 
 type (
@@ -89,35 +98,35 @@ type (
 )
 
 func Run() {
+	m := model{
+		player: playback.NewPlayer(),
+		queue:  playback.NewQueue(),
+		active: "library",
+	}
 	if !config.ConfigExists() {
-		config.RunSetup()
+		m.setup = true
+		m.setupState = setupWelcome
+	} else {
+		musicDir, err := config.GetMusicDir()
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			os.Exit(1)
+		}
+		lib, err := m.queue.ScanDir(musicDir)
+		if err != nil {
+			fmt.Printf("Error scanning %s: %v\n", musicDir, err)
+			os.Exit(1)
+		}
+		if len(lib) == 0 {
+			fmt.Printf("No music files found in %s\n", musicDir)
+			os.Exit(1)
+		}
+		m.library = lib
 	}
 
-	musicDir, err := config.GetMusicDir()
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	q := playback.NewQueue()
-	lib, err := q.ScanDir(musicDir)
-	if err != nil {
-		fmt.Printf("Error scanning %s: %v\n", musicDir, err)
-		os.Exit(1)
-	}
-	if len(lib) == 0 {
-		fmt.Printf("No music files found in %s\n", musicDir)
-		os.Exit(1)
-	}
-
-	p := tea.NewProgram(model{
-		player:  playback.NewPlayer(),
-		library: lib,
-		queue:   q,
-		active:  "library",
-	})
+	p := tea.NewProgram(m)
 	if _, err := p.Run(); err != nil {
-		fmt.Printf("Alas, there's been an error: %v\n", err)
+		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -130,11 +139,11 @@ func (m model) visibleRows() int {
 	if m.height == 0 {
 		return 10
 	}
-	overhead := 4 // panel borders + header + separator
-	overhead += 1 // gap after panels
-	overhead += 1 // controls help
+	overhead := 4
+	overhead += 1
+	overhead += 1
 	if m.player.CurrentTrack().Path != "" {
-		overhead += 2 // now-playing + gap after it
+		overhead += 2
 	}
 	rows := m.height - overhead
 	if rows < 1 {
@@ -149,6 +158,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case tea.KeyPressMsg:
+		if m.setup {
+			mm, cmd := m.handleSetupKey(msg)
+			return mm, cmd
+		}
+
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -319,6 +333,75 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) handleSetupKey(msg tea.KeyPressMsg) (model, tea.Cmd) {
+	switch m.setupState {
+	case setupWelcome:
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "1":
+			home, err := os.UserHomeDir()
+			if err != nil {
+				m.errMsg = "cannot determine home directory"
+				return m, nil
+			}
+			path := home + "/Music"
+			m.finishSetup(path)
+		case "2":
+			m.setupState = setupInput
+			m.errMsg = ""
+		}
+
+	case setupInput:
+		switch msg.String() {
+		case "enter":
+			if m.setupInput == "" {
+				m.errMsg = "Path cannot be empty"
+				return m, nil
+			}
+			m.finishSetup(m.setupInput)
+		case "esc":
+			m.setupState = setupWelcome
+			m.setupInput = ""
+			m.errMsg = ""
+		case "backspace":
+			if len(m.setupInput) > 0 {
+				m.setupInput = m.setupInput[:len(m.setupInput)-1]
+			}
+		default:
+			k := msg.String()
+			if len(k) == 1 {
+				m.setupInput += k
+			}
+		}
+	}
+	return m, nil
+}
+
+func (m *model) finishSetup(path string) {
+	if err := config.ValidateMusicDir(path); err != nil {
+		m.errMsg = err.Error()
+		return
+	}
+	if err := config.SaveConfig(config.Config{MusicDir: path}); err != nil {
+		m.errMsg = err.Error()
+		return
+	}
+	lib, err := m.queue.ScanDir(path)
+	if err != nil {
+		m.errMsg = fmt.Sprintf("Error scanning: %v", err)
+		return
+	}
+	if len(lib) == 0 {
+		m.errMsg = "No music files found"
+		return
+	}
+	m.library = lib
+	m.setup = false
+	m.setupInput = ""
+	m.errMsg = ""
+}
+
 func waitForSongEnd(player *playback.Player, id int) tea.Cmd {
 	return func() tea.Msg {
 		player.Wait()
@@ -468,7 +551,35 @@ func (m model) renderColumns() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, libJoined, queueJoined)
 }
 
+func (m model) setupView() tea.View {
+	var s string
+	s += "Welcome to Resonance 🎵\n\n"
+	s += "No music library configured.\n\n"
+
+	if m.errMsg != "" {
+		s += fmt.Sprintf("Error: %s\n\n", m.errMsg)
+	}
+
+	switch m.setupState {
+	case setupWelcome:
+		s += "Press 1 to use ~/Music\n"
+		s += "Press 2 to enter a custom path\n\n"
+		s += "q:Quit"
+
+	case setupInput:
+		s += "Enter music directory path:\n"
+		s += "> " + m.setupInput + "█\n\n"
+		s += "Enter:Confirm  Esc:Cancel"
+	}
+
+	return tea.NewView(s)
+}
+
 func (m model) View() tea.View {
+	if m.setup {
+		return m.setupView()
+	}
+
 	var s string
 
 	if np := m.renderNowPlaying(); np != "" {
