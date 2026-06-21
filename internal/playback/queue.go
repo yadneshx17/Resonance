@@ -1,10 +1,10 @@
 package playback
 
 import (
-	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gopxl/beep/mp3"
 )
@@ -88,34 +88,30 @@ func (q *Queue) Shuffle() {
 	})
 }
 
-func (q *Queue) ScanDir(dir string) ([]Track, error) {
-	dirPath := filepath.Join("..", "..", dir)
-	files, err := os.ReadDir(dirPath)
-	if err != nil {
-		return []Track{}, err
-	}
-
+func (q *Queue) ScanDir(root string) ([]Track, error) {
 	var tracks []Track
-	for _, file := range files {
-		if file.IsDir() {
-			continue
-		}
-
-		fpath := filepath.Join(dirPath, file.Name())
-		f, err := os.Open(fpath)
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			continue
+			return nil
 		}
-
+		if info.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(strings.ToLower(info.Name()), ".mp3") {
+			return nil
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return nil
+		}
 		_, _, err = mp3.Decode(f)
 		if err != nil {
 			f.Close()
-			fmt.Printf("\nSkipping %s: %v", file.Name(), err)
-			continue
+			return nil
 		}
 		f.Close()
-
-		tracks = append(tracks, Track{Path: file.Name()})
-	}
-	return tracks, nil
+		tracks = append(tracks, Track{Path: path})
+		return nil
+	})
+	return tracks, err
 }

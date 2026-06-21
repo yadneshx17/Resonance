@@ -3,7 +3,6 @@ package playback
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -97,9 +96,7 @@ func (p *Player) Load(track Track) error {
 		p.streamer.Close()
 	}
 
-	// Todo: Absolute/Full path from track or scan for particular name conventioal file something, argument or shii
-	path := filepath.Join("..", "..", "Music", track.Path)
-	f, err := os.Open(path)
+	f, err := os.Open(track.Path)
 	if err != nil {
 		return err
 	}

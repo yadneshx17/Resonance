@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/yadneshx17/resonance/internal/config"
 	"github.com/yadneshx17/resonance/internal/playback"
 )
 
@@ -88,10 +89,24 @@ type (
 )
 
 func Run() {
-	q := playback.NewQueue()
-	lib, err := q.ScanDir("Music")
+	if !config.ConfigExists() {
+		config.RunSetup()
+	}
+
+	musicDir, err := config.GetMusicDir()
 	if err != nil {
-		fmt.Printf("Error scanning: %v", err)
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	q := playback.NewQueue()
+	lib, err := q.ScanDir(musicDir)
+	if err != nil {
+		fmt.Printf("Error scanning %s: %v\n", musicDir, err)
+		os.Exit(1)
+	}
+	if len(lib) == 0 {
+		fmt.Printf("No music files found in %s\n", musicDir)
 		os.Exit(1)
 	}
 
@@ -102,7 +117,7 @@ func Run() {
 		active:  "library",
 	})
 	if _, err := p.Run(); err != nil {
-		fmt.Printf("Alas, there's been an error: %v", err)
+		fmt.Printf("Alas, there's been an error: %v\n", err)
 		os.Exit(1)
 	}
 }
