@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/yadneshx17/resonance/internal/config"
+	"github.com/yadneshx17/resonance/internal/library"
 	"github.com/yadneshx17/resonance/internal/playback"
 )
 
@@ -76,8 +77,8 @@ const (
 
 type model struct {
 	player      *playback.Player
-	library     []playback.Track
 	queue       *playback.Queue
+	browser     *library.Browser
 	libCursor   int
 	queueCursor int
 	libOffset   int
@@ -112,16 +113,12 @@ func Run() {
 			fmt.Printf("Error: %v\n", err)
 			os.Exit(1)
 		}
-		lib, err := m.queue.ScanDir(musicDir)
+		b, err := library.NewBrowser(musicDir)
 		if err != nil {
-			fmt.Printf("Error scanning %s: %v\n", musicDir, err)
+			fmt.Printf("Error reading %s: %v\n", musicDir, err)
 			os.Exit(1)
 		}
-		if len(lib) == 0 {
-			fmt.Printf("No music files found in %s\n", musicDir)
-			os.Exit(1)
-		}
-		m.library = lib
+		m.browser = b
 	}
 
 	p := tea.NewProgram(m)
@@ -193,7 +190,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			vis := m.visibleRows()
 			if m.active == "library" {
-				if m.libCursor < len(m.library)-1 {
+				if m.libCursor < len(m.browser.Entries)-1 {
 					m.libCursor++
 				}
 				if m.libCursor >= m.libOffset+vis {
@@ -206,12 +203,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "a":
-			if m.active == "library" && len(m.library) > 0 {
-				m.queue.Add(m.library[m.libCursor])
+			if m.active == "library" && len(m.browser.Entries) > 0 {
+				entry := m.browser.Entries[m.libCursor]
+				if entry.IsDir {
+					tracks, _ := m.queue.ScanDir(entry.Path)
+					for _, t := range tracks {
+						m.queue.Add(t)
+					}
+				} else {
+					m.queue.Add(playback.Track{Path: entry.Path})
+				}
 			}
 		case "A":
-			if m.active == "library" && len(m.library) > 0 {
-				for _, t := range m.library {
+			if m.active == "library" {
+				tracks, _ := m.queue.ScanDir(m.browser.CurrentPath)
+				for _, t := range tracks {
 					m.queue.Add(t)
 				}
 			}
@@ -225,8 +231,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.queueOffset = max(0, m.queue.Len()-1)
 				}
 			}
+		case "backspace", "h":
+			if m.active == "library" && m.browser.CanGoBack() {
+				m.browser.GoBack()
+				m.libCursor = 0
+				m.libOffset = 0
+			}
 		case "enter":
-			if m.active == "queue" && m.queue.Len() > 0 {
+			if m.active == "library" && len(m.browser.Entries) > 0 {
+				entry := m.browser.Entries[m.libCursor]
+				if entry.IsDir {
+					m.browser.Open(m.libCursor)
+					m.libCursor = 0
+					m.libOffset = 0
+				} else {
+					m.playingID++
+					m.errMsg = ""
+					m.player.Stop()
+					m.queue.Clear()
+					track := playback.Track{Path: entry.Path}
+					m.queue.Add(track)
+					m.queue.SetCurrent(0)
+					m.queueCursor = 0
+					m.queueOffset = 0
+					if err := m.player.Load(track); err != nil {
+						m.errMsg = fmt.Sprintf("Error: %v", err)
+						return m, nil
+					}
+					m.player.Play()
+					return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
+				}
+			} else if m.active == "queue" && m.queue.Len() > 0 {
 				m.playingID++
 				m.errMsg = ""
 				m.player.Stop()
@@ -387,16 +422,12 @@ func (m *model) finishSetup(path string) {
 		m.errMsg = err.Error()
 		return
 	}
-	lib, err := m.queue.ScanDir(path)
+	b, err := library.NewBrowser(path)
 	if err != nil {
-		m.errMsg = fmt.Sprintf("Error scanning: %v", err)
+		m.errMsg = fmt.Sprintf("Error reading directory: %v", err)
 		return
 	}
-	if len(lib) == 0 {
-		m.errMsg = "No music files found"
-		return
-	}
-	m.library = lib
+	m.browser = b
 	m.setup = false
 	m.setupInput = ""
 	m.errMsg = ""
@@ -449,23 +480,31 @@ func (m model) renderNowPlaying() string {
 		volStr = "🔇 muted"
 	}
 
-	return fmt.Sprintf("%s %s  %s  %s  %s", icon, currtrack.Path, bar, t, volStr)
+	name := currtrack.Path
+	if idx := strings.LastIndexByte(currtrack.Path, '/'); idx >= 0 {
+		name = currtrack.Path[idx+1:]
+	}
+	return fmt.Sprintf("%s %s  %s  %s  %s", icon, name, bar, t, volStr)
 }
 
-func (m model) buildLibBlock(slice []playback.Track, offset int) string {
+func (m model) buildLibBlock(slice []library.Entry, offset int) string {
 	var s string
-	s += headerStyle.Render("Library") + "\n"
-	s += "────────\n"
+	s += headerStyle.Render("Library: "+m.browser.CurrentName()) + "\n"
+	s += "────────────────────────\n"
 	if len(slice) == 0 {
-		s += "No matching tracks\n"
+		s += "Empty\n"
 	} else {
-		for i, t := range slice {
+		for i, e := range slice {
 			idx := offset + i
-			prefix := " "
+			prefix := "  "
 			if m.active == "library" && m.libCursor == idx {
-				prefix = cursorStyle.Render(">")
+				prefix = cursorStyle.Render("> ")
 			}
-			s += fmt.Sprintf("%s %s\n", prefix, t.Path)
+			icon := "🎵"
+			if e.IsDir {
+				icon = "📁"
+			}
+			s += fmt.Sprintf("%s%s %s\n", prefix, icon, e.Name)
 		}
 	}
 	return s
@@ -478,11 +517,15 @@ func (m model) buildQueueBlock(slice []playback.Track, offset int) string {
 	s += "─────\n"
 	for i, t := range slice {
 		idx := offset + i
-		line := fmt.Sprintf("  %s", t.Path)
+		name := t.Path
+		if idx := strings.LastIndexByte(t.Path, '/'); idx >= 0 {
+			name = t.Path[idx+1:]
+		}
+		line := fmt.Sprintf("  %s", name)
 		if idx == playingIdx && m.player.State() != playback.Stopped {
-			line = playingTrackStyle.Render(fmt.Sprintf("▶ %s", t.Path))
+			line = playingTrackStyle.Render(fmt.Sprintf("▶ %s", name))
 		} else if m.active == "queue" && m.queueCursor == idx {
-			line = cursorStyle.Render(fmt.Sprintf("> %s", t.Path))
+			line = cursorStyle.Render(fmt.Sprintf("> %s", name))
 		}
 		s += line + "\n"
 	}
@@ -491,9 +534,9 @@ func (m model) buildQueueBlock(slice []playback.Track, offset int) string {
 
 func (m model) renderColumns() string {
 	vis := m.visibleRows()
-	lib := m.library
+	entries := m.browser.Entries
 
-	libLen := len(lib)
+	libLen := len(entries)
 	if m.libOffset > libLen-vis && libLen > vis {
 		m.libOffset = libLen - vis
 	}
@@ -501,10 +544,10 @@ func (m model) renderColumns() string {
 		m.libOffset = 0
 	}
 
-	libSlice := lib
+	libSlice := entries
 	libOffset := 0
 	if libLen > vis {
-		libSlice = lib[m.libOffset : m.libOffset+vis]
+		libSlice = entries[m.libOffset : m.libOffset+vis]
 		libOffset = m.libOffset
 	}
 
@@ -579,6 +622,9 @@ func (m model) View() tea.View {
 	if m.setup {
 		return m.setupView()
 	}
+	if m.browser == nil {
+		return tea.NewView("Loading...")
+	}
 
 	var s string
 
@@ -589,9 +635,9 @@ func (m model) View() tea.View {
 	s += m.renderColumns()
 	s += "\n"
 
-	help := "n:Next  p:Prev  Space  a:Add  A:AddAll  d:Remove  [:Vol-  ]:Vol+  m:Mute  ←→Tab:Switch  Enter:Play  q:Quit"
+	help := "n:Next  p:Prev  Space  a:Add  A:AddAll  d:Remove  [:Vol-  ]:Vol+  m:Mute  ←→Tab:Switch h/Backspace:ascend  Enter:Play  q:Quit"
 	if m.queue.Len() == 0 && m.player.State() == playback.Stopped {
-		help = "a:Add  A:AddAll  ←→Tab:Switch  q:Quit  (queue empty)"
+		help = "a:Add  A:AddAll  ←→/Tab:Switch  h/Backspace:ascend  q:Quit  (queue empty)"
 	}
 	s += help
 
