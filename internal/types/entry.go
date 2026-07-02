@@ -1,4 +1,4 @@
-package library
+package types
 
 type Entry struct {
 	Name  string

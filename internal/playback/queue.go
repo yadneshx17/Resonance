@@ -7,10 +7,11 @@ import (
 	"strings"
 
 	"github.com/gopxl/beep/mp3"
+	"github.com/yadneshx17/resonance/internal/types"
 )
 
 type Queue struct {
-	tracks  []Track
+	tracks  []types.Track
 	current int
 }
 
@@ -18,29 +19,29 @@ func NewQueue() *Queue {
 	return &Queue{}
 }
 
-func (q *Queue) Add(track Track) {
+func (q *Queue) Add(track types.Track) {
 	q.tracks = append(q.tracks, track)
 }
 
-func (q *Queue) Next() (Track, bool) {
+func (q *Queue) Next() (types.Track, bool) {
 	if q.current+1 >= len(q.tracks) {
-		return Track{}, false
+		return types.Track{}, false
 	}
 	q.current++
 	return q.tracks[q.current], true
 }
 
-func (q *Queue) Prev() (Track, bool) {
+func (q *Queue) Prev() (types.Track, bool) {
 	if q.current-1 < 0 {
-		return Track{}, false
+		return types.Track{}, false
 	}
 	q.current--
 	return q.tracks[q.current], true
 }
 
-func (q *Queue) Current() (Track, bool) {
+func (q *Queue) Current() (types.Track, bool) {
 	if len(q.tracks) == 0 {
-		return Track{}, false
+		return types.Track{}, false
 	}
 	return q.tracks[q.current], true
 }
@@ -72,8 +73,8 @@ func (q *Queue) Clear() {
 	q.current = 0
 }
 
-func (q *Queue) List() []Track {
-	result := make([]Track, len(q.tracks))
+func (q *Queue) List() []types.Track {
+	result := make([]types.Track, len(q.tracks))
 	copy(result, q.tracks)
 	return result
 }
@@ -88,13 +89,15 @@ func (q *Queue) Shuffle() {
 	})
 }
 
-func (q *Queue) ScanDir(root string) ([]Track, error) {
-	var tracks []Track
+// recursive directory transversal.
+func (q *Queue) ScanDir(root string) ([]types.Track, error) {
+	var tracks []types.Track
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
 		if info.IsDir() {
+			// skips and continue the scanning.
 			return nil
 		}
 		if !strings.HasSuffix(strings.ToLower(info.Name()), ".mp3") {
@@ -109,8 +112,9 @@ func (q *Queue) ScanDir(root string) ([]Track, error) {
 			f.Close()
 			return nil
 		}
+		// defer in loops leaks file handles
 		f.Close()
-		tracks = append(tracks, Track{Path: path})
+		tracks = append(tracks, types.Track{Path: path})
 		return nil
 	})
 	return tracks, err

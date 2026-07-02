@@ -8,6 +8,7 @@ import (
 
 	"github.com/gopxl/beep"
 	"github.com/gopxl/beep/effects"
+	"github.com/yadneshx17/resonance/internal/types"
 	"github.com/gopxl/beep/mp3"
 	"github.com/gopxl/beep/speaker"
 )
@@ -17,18 +18,18 @@ type Player struct {
 	streamer  beep.StreamSeekCloser // decoded audio + ( Close, Seek, Position )
 	format    beep.Format           // sample rate info
 	ctrl      *beep.Ctrl            // enables pause/resume
-	volume    *effects.Volume       // volume control
+	volume    *effects.Volume       // volume control=
 	state     PlaybackState
-	track     *Track
+	track     *types.Track
 	done      chan struct{}
-	closeOnce sync.Once            // fixes: panic closing closed channel
-	volLevel  float64              // current volume level (-3 to 3)
+	closeOnce sync.Once // fixes: panic closing closed channel
+	volLevel  float64   // current volume level (-3 to 3)
 	muted     bool
-	prevVol   float64              // volume before mute
+	prevVol   float64 // volume before mute
 }
 
 type AudioEngine interface {
-	Load(track Track) error
+	Load(track types.Track) error
 
 	Wait()
 	Play() error
@@ -49,9 +50,9 @@ func NewPlayer() *Player {
 	}
 }
 
-func (p *Player) CurrentTrack() Track {
+func (p *Player) CurrentTrack() types.Track {
 	if p.track == nil {
-		return Track{}
+		return types.Track{}
 	}
 	return *p.track
 }
@@ -91,7 +92,7 @@ func (p *Player) IsMuted() bool {
 	return p.muted
 }
 
-func (p *Player) Load(track Track) error {
+func (p *Player) Load(track types.Track) error {
 	if p.streamer != nil {
 		p.streamer.Close()
 	}
@@ -101,6 +102,10 @@ func (p *Player) Load(track Track) error {
 		return err
 	}
 
+	/*
+		Decode() returns a streamer, which reads compressed bytes from the file,
+		decodes them into PCM audio samples on demand, and supports seeking if the underlying file supports seeking.
+	*/
 	streamer, format, err := mp3.Decode(f)
 	if err != nil {
 		f.Close()
@@ -127,7 +132,10 @@ func (p *Player) Play() error {
 	// fix: This should be decoupled and Init at application startup and not for every song.
 	speaker.Init(p.format.SampleRate, p.format.SampleRate.N(time.Second/10))
 
-	p.ctrl = &beep.Ctrl{Streamer: p.streamer, Paused: false}
+	// allows for pausing a Streamer.
+	p.ctrl = &beep.Ctrl{Streamer: p.streamer, Paused: false} 
+
+	// Volume adjusts the volume of the wrapped Streamer in a human-natural way
 	p.volume = &effects.Volume{Streamer: p.ctrl, Base: 2, Volume: p.volLevel, Silent: p.muted}
 
 	p.closeOnce = sync.Once{}

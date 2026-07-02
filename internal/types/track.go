@@ -1,4 +1,4 @@
-package playback
+package types
 
 import "time"
 

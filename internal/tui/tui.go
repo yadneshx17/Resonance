@@ -8,67 +8,24 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/yadneshx17/resonance/internal/common"
 	"github.com/yadneshx17/resonance/internal/config"
 	"github.com/yadneshx17/resonance/internal/library"
 	"github.com/yadneshx17/resonance/internal/playback"
+	"github.com/yadneshx17/resonance/internal/types"
+
+	"github.com/yadneshx17/resonance/internal/components"
 )
 
 var (
-	panelStyle = lipgloss.NewStyle().
-			Border(lipgloss.NormalBorder()).
-			Padding(0, 1)
-
-	activePanelStyle = lipgloss.NewStyle().
-				Border(lipgloss.NormalBorder()).
-				BorderForeground(lipgloss.Color("#7D56F4")).
-				Padding(0, 1)
-
-	headerStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#7D56F4"))
-
-	playingIconStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("#00FF00"))
-
-	pausedIconStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFD700"))
-
-	playingTrackStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("#20002F")).
-				Background(lipgloss.Color("#F5F5DC"))
-
-	cursorStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#FFD700"))
+	panelStyle        = common.PanelStyle
+	activePanelStyle  = common.ActivePanelStyle
+	headerStyle       = common.HeaderStyle
+	playingIconStyle  = common.PlayingIconStyle
+	pausedIconStyle   = common.PausedIconStyle
+	playingTrackStyle = common.PlayingTrackStyle
+	cursorStyle       = common.CursorStyle
 )
-
-func fmtDuration(d time.Duration) string {
-	d = d.Round(time.Second)
-	m := int(d.Minutes())
-	s := int(d.Seconds()) % 60
-	return fmt.Sprintf("%d:%02d", m, s)
-}
-
-func progressBar(pos, dur time.Duration, width int) string {
-	if dur == 0 {
-		return ""
-	}
-	filled := int(float64(pos) / float64(dur) * float64(width))
-	if filled > width {
-		filled = width
-	}
-	bar := ""
-	for i := 0; i < width; i++ {
-		if i < filled {
-			bar += "█"
-		} else {
-			bar += "░"
-		}
-	}
-	return bar
-}
 
 const (
 	setupWelcome = iota
@@ -87,10 +44,18 @@ type model struct {
 	playingID   int
 	errMsg      string
 	height      int
+	width       int
+	tooSmall    bool
 
 	setup      bool
 	setupState int
 	setupInput string
+
+	top          *components.Top
+	libraryPanel *components.Library
+	visual       *components.Visual
+	queuePanel   *components.Queue
+	footer       *components.Footer
 }
 
 type (
@@ -100,9 +65,16 @@ type (
 
 func Run() {
 	m := model{
-		player: playback.NewPlayer(),
-		queue:  playback.NewQueue(),
-		active: "library",
+		player:       playback.NewPlayer(),
+		queue:        playback.NewQueue(),
+		active:       "library",
+		height:       24,
+		width:        80,
+		top:          &components.Top{},
+		libraryPanel: &components.Library{},
+		visual:       &components.Visual{},
+		queuePanel:   &components.Queue{},
+		footer:       &components.Footer{},
 	}
 	if !config.ConfigExists() {
 		m.setup = true
@@ -134,25 +106,25 @@ func (m model) Init() tea.Cmd {
 
 func (m model) visibleRows() int {
 	if m.height == 0 {
-		return 10
+		return 20
 	}
-	overhead := 4
-	overhead += 1
-	overhead += 1
-	if m.player.CurrentTrack().Path != "" {
-		overhead += 2
+	// mainHeight = m.height - top(1) - playback(5)
+	// inside border = mainHeight - 2
+	// subtract 2 header lines (title + separator)
+	// = m.height - 6 - 2 - 2 = m.height - 10
+	n := m.height - 10
+	if n < 0 {
+		return 0
 	}
-	rows := m.height - overhead
-	if rows < 1 {
-		rows = 1
-	}
-	return rows
+	return n
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.height = msg.Height
+		m.width = msg.Width
+		m.tooSmall = m.width < 60 || m.height < 24
 
 	case tea.KeyPressMsg:
 		if m.setup {
@@ -211,7 +183,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.queue.Add(t)
 					}
 				} else {
-					m.queue.Add(playback.Track{Path: entry.Path})
+					m.queue.Add(types.Track{Path: entry.Path})
 				}
 			}
 		case "A":
@@ -231,7 +203,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.queueOffset = max(0, m.queue.Len()-1)
 				}
 			}
-		case "backspace", "h":
+		case "esc", "h":
 			if m.active == "library" && m.browser.CanGoBack() {
 				m.browser.GoBack()
 				m.libCursor = 0
@@ -249,7 +221,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.errMsg = ""
 					m.player.Stop()
 					m.queue.Clear()
-					track := playback.Track{Path: entry.Path}
+					track := types.Track{Path: entry.Path}
 					m.queue.Add(track)
 					m.queue.SetCurrent(0)
 					m.queueCursor = 0
@@ -446,48 +418,7 @@ func tick() tea.Cmd {
 	})
 }
 
-func (m model) renderNowPlaying() string {
-	currtrack := m.player.CurrentTrack()
-	if currtrack.Path == "" {
-		return ""
-	}
-
-	var icon string
-	switch m.player.State() {
-	case playback.Playing:
-		icon = playingIconStyle.Render("▶")
-	case playback.Paused:
-		icon = pausedIconStyle.Render("||")
-	default:
-		icon = "♫"
-	}
-
-	barWidth := 20
-	pos := m.player.Position()
-	dur := m.player.Duration()
-	bar := progressBar(pos, dur, barWidth)
-	t := fmt.Sprintf("%s / %s", fmtDuration(pos), fmtDuration(dur))
-
-	vol := m.player.Volume()
-	volPct := int((vol + 3) / 6 * 100)
-	if volPct < 0 {
-		volPct = 0
-	} else if volPct > 100 {
-		volPct = 100
-	}
-	volStr := fmt.Sprintf("vol:%d%%", volPct)
-	if m.player.IsMuted() {
-		volStr = "🔇 muted"
-	}
-
-	name := currtrack.Path
-	if idx := strings.LastIndexByte(currtrack.Path, '/'); idx >= 0 {
-		name = currtrack.Path[idx+1:]
-	}
-	return fmt.Sprintf("%s %s  %s  %s  %s", icon, name, bar, t, volStr)
-}
-
-func (m model) buildLibBlock(slice []library.Entry, offset int) string {
+func (m model) buildLibBlock(slice []types.Entry, offset int) string {
 	var s string
 	s += headerStyle.Render("Library: "+m.browser.CurrentName()) + "\n"
 	s += "────────────────────────\n"
@@ -500,9 +431,9 @@ func (m model) buildLibBlock(slice []library.Entry, offset int) string {
 			if m.active == "library" && m.libCursor == idx {
 				prefix = cursorStyle.Render("> ")
 			}
-			icon := "🎵"
+			icon := common.Music
 			if e.IsDir {
-				icon = "📁"
+				icon = common.Directory
 			}
 			s += fmt.Sprintf("%s%s %s\n", prefix, icon, e.Name)
 		}
@@ -510,7 +441,7 @@ func (m model) buildLibBlock(slice []library.Entry, offset int) string {
 	return s
 }
 
-func (m model) buildQueueBlock(slice []playback.Track, offset int) string {
+func (m model) buildQueueBlock(slice []types.Track, offset int) string {
 	playingIdx := m.queue.CurrentIndex()
 	var s string
 	s += headerStyle.Render("Queue") + "\n"
@@ -590,7 +521,6 @@ func (m model) renderColumns() string {
 		libJoined = panelStyle.Render(libJoined)
 		queueJoined = activePanelStyle.Render(queueJoined)
 	}
-
 	return lipgloss.JoinHorizontal(lipgloss.Top, libJoined, queueJoined)
 }
 
@@ -615,35 +545,150 @@ func (m model) setupView() tea.View {
 		s += "Enter:Confirm  Esc:Cancel"
 	}
 
-	return tea.NewView(s)
+	return tea.View{
+		AltScreen: true,
+		Content:   s,
+	}
 }
 
 func (m model) View() tea.View {
 	if m.setup {
 		return m.setupView()
 	}
-	if m.browser == nil {
-		return tea.NewView("Loading...")
+
+	if m.tooSmall {
+		badStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#d46159")).Bold(true)
+
+		wStr := fmt.Sprintf("%d", m.width)
+		if m.width < 60 {
+			wStr = badStyle.Render(fmt.Sprintf("%d", m.width))
+		}
+		hStr := fmt.Sprintf("%d", m.height)
+		if m.height < 24 {
+			hStr = badStyle.Render(fmt.Sprintf("%d", m.height))
+		}
+
+		s := fmt.Sprintf("Terminal size too small\nWidth = %s  Height = %s\n\nNeeded for current config\nWidth >= 60, Height >= 24", wStr, hStr)
+		return tea.View{
+			AltScreen: true,
+			Content:   lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, s),
+		}
 	}
 
-	var s string
+	topHeight := 1
+	playbackHeight := 5
+	mainHeight := m.height - topHeight - playbackHeight
 
-	if np := m.renderNowPlaying(); np != "" {
-		s += np + "\n\n"
+	// gap := 1
+	sideWidth := m.width / 4
+	visWidth := m.width / 2
+	queueWidth := m.width - sideWidth - visWidth
+
+	vis := m.visibleRows()
+	entries := m.browser.Entries
+	libSlice := entries
+	libOffset := 0
+	if len(entries) > vis {
+		off := m.libOffset
+		if off > len(entries)-vis {
+			off = len(entries) - vis
+		}
+		if off < 0 {
+			off = 0
+		}
+		libSlice = entries[off : off+vis]
+		libOffset = off
+	}
+	m.libraryPanel.SetData(components.LibData{
+		Entries: libSlice,
+		Title:   m.browser.CurrentName(),
+		Cursor:  m.libCursor,
+		Offset:  libOffset,
+		Active:  m.active == "library",
+		Width:   sideWidth,
+		Height:  mainHeight,
+	})
+
+	tracks := m.queue.List()
+	queueSlice := tracks
+	queueOffset := 0
+	if len(tracks) > vis {
+		off := m.queueOffset
+		if off > len(tracks)-vis {
+			off = len(tracks) - vis
+		}
+		if off < 0 {
+			off = 0
+		}
+		queueSlice = tracks[off : off+vis]
+		queueOffset = off
+	}
+	m.queuePanel.SetData(components.QueueData{
+		Tracks:     queueSlice,
+		PlayingIdx: m.queue.CurrentIndex(),
+		Playing:    m.player.State() != playback.Stopped,
+		Cursor:     m.queueCursor,
+		Offset:     queueOffset,
+		Active:     m.active == "queue",
+		Width:      queueWidth,
+		Height:     mainHeight,
+	})
+
+	track := m.player.CurrentTrack()
+	trackName := ""
+	if track.Path != "" {
+		if idx := strings.LastIndexByte(track.Path, '/'); idx >= 0 {
+			trackName = track.Path[idx+1:]
+		}
+	}
+	var stateIcon string
+	switch m.player.State() {
+	case playback.Playing:
+		stateIcon = 	playingIconStyle.Render(common.Play)
+	case playback.Paused:
+		stateIcon = 		pausedIconStyle.Render(common.Pause)
+	default:
+		stateIcon = common.MusicNote
 	}
 
-	s += m.renderColumns()
-	s += "\n"
+	m.visual.SetData(components.VisualData{
+		TrackName: trackName,
+		StateIcon: stateIcon,
+		Position:  m.player.Position(),
+		Duration:  m.player.Duration(),
+		VolLevel:  m.player.Volume(),
+		Muted:     m.player.IsMuted(),
+		Height:    mainHeight,
+		Width:     visWidth,
+	})
 
-	help := "n:Next  p:Prev  Space  a:Add  A:AddAll  d:Remove  [:Vol-  ]:Vol+  m:Mute  ←→Tab:Switch h/Backspace:ascend  Enter:Play  q:Quit"
-	if m.queue.Len() == 0 && m.player.State() == playback.Stopped {
-		help = "a:Add  A:AddAll  ←→/Tab:Switch  h/Backspace:ascend  q:Quit  (queue empty)"
+	m.footer.SetData(components.FooterData{
+		TrackName: trackName,
+		StateIcon: stateIcon,
+		Position:  m.player.Position(),
+		Duration:  m.player.Duration(),
+		VolLevel:  m.player.Volume(),
+		Muted:     m.player.IsMuted(),
+		Height:    playbackHeight,
+		Width:     m.width,
+	})
+
+	m.top.SetTrackCount(m.browser.TrackCount())
+
+	s := lipgloss.JoinVertical(
+		lipgloss.Left,
+		m.top.View(topHeight, m.width),
+		lipgloss.JoinHorizontal(
+			lipgloss.Top,
+			m.libraryPanel.View(),
+			m.visual.View(),
+			m.queuePanel.View(),
+		),
+		m.footer.View(),
+	)
+
+	return tea.View{
+		AltScreen: true,
+		Content:   s,
 	}
-	s += help
-
-	if m.errMsg != "" {
-		s += "\n" + m.errMsg
-	}
-
-	return tea.NewView(s)
 }

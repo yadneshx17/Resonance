@@ -5,13 +5,18 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/yadneshx17/resonance/internal/types"
 )
+
+type Entry = types.Entry
 
 type Browser struct {
 	RootPath    string
 	CurrentPath string
 	Entries     []Entry
 	History     []string
+	trackCount  int
 }
 
 func NewBrowser(rootPath string) (*Browser, error) {
@@ -22,7 +27,26 @@ func NewBrowser(rootPath string) (*Browser, error) {
 	if err := b.ReadDir(); err != nil {
 		return nil, err
 	}
+	b.scanTrackCount()
 	return b, nil
+}
+
+func (b *Browser) scanTrackCount() {
+	count := 0
+	filepath.Walk(b.RootPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !info.IsDir() && strings.HasSuffix(strings.ToLower(info.Name()), ".mp3") {
+			count++
+		}
+		return nil
+	})
+	b.trackCount = count
+}
+
+func (b *Browser) TrackCount() int {
+	return b.trackCount
 }
 
 func (b *Browser) ReadDir() error {
