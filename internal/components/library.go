@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/yadneshx17/resonance/internal/common"
@@ -63,6 +64,7 @@ func (l Library) buildLibBlock() string {
 	if nameMax < 1 {
 		nameMax = 1
 	}
+	var lines []string
 	for i, e := range l.entries {
 		idx := l.libOffset + i
 		prefix := "  "
@@ -78,8 +80,9 @@ func (l Library) buildLibBlock() string {
 		if len(runes) > nameMax {
 			name = string(runes[:nameMax-1]) + "…"
 		}
-		s += fmt.Sprintf("%s%s %s\n", prefix, icon, name)
+		lines = append(lines, fmt.Sprintf("%s%s %s", prefix, icon, name))
 	}
+	s += strings.Join(lines, "\n")
 	return s
 }
 

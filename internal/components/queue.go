@@ -61,6 +61,7 @@ func (q Queue) buildQueueBlock() string {
 	if nameMax < 1 {
 		nameMax = 1
 	}
+	var lines []string
 	for i, t := range q.tracks {
 		idx := q.offset + i
 		name := t.Path
@@ -77,8 +78,9 @@ func (q Queue) buildQueueBlock() string {
 		} else if q.active && q.cursor == idx {
 			line = common.CursorStyle.Render(common.Cursor + "" + name)
 		}
-		s += line + "\n"
+		lines = append(lines, line)
 	}
+	s += strings.Join(lines, "\n")
 	return s
 }
 
