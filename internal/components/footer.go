@@ -90,7 +90,7 @@ func (f Footer) buildFooterBlock() string {
 	}
 	volStr := ""
 	if f.muted {
-		volStr = common.VolumeMute + " muted"
+		volStr = "[MUTE]"
 	} else {
 		volIcon := common.VolumeLow
 		if volPct > 33 {

@@ -34,6 +34,10 @@ type Queue struct {
 var queuePanel = lipgloss.NewStyle().
 	Border(lipgloss.RoundedBorder())
 
+var queueActivePanel = lipgloss.NewStyle().
+	Border(lipgloss.RoundedBorder()).
+	BorderForeground(lipgloss.Color("#7D56F4"))
+
 func (q *Queue) SetData(data QueueData) {
 	q.tracks = data.Tracks
 	q.playingIdx = data.PlayingIdx
@@ -51,7 +55,11 @@ func (q Queue) buildQueueBlock() string {
 	}
 	var s string
 	s += common.HeaderStyle.Render("Queue") + "\n"
-	s += "─────\n"
+	var bar string
+	for i := 0; i < q.width-2; i++ {
+    	bar += "─"
+	}
+	s += bar + "\n"
 	if len(q.tracks) == 0 {
 		s += " Empty\n"
 		return s
@@ -70,7 +78,7 @@ func (q Queue) buildQueueBlock() string {
 		}
 		runes := []rune(name)
 		if len(runes) > nameMax {
-			name = string(runes[:nameMax-1]) + "…"
+			name = string(runes[:nameMax-3]) + "…"
 		}
 		line := fmt.Sprintf("  %s", name)
 		if idx == q.playingIdx && q.playing {
@@ -86,7 +94,11 @@ func (q Queue) buildQueueBlock() string {
 
 func (q Queue) View() string {
 	content := q.buildQueueBlock()
-	return queuePanel.
+	style := queuePanel
+	if q.active {
+		style = queueActivePanel
+	}
+	return style.
 		Width(q.width).
 		Height(q.height).
 		Render(content)

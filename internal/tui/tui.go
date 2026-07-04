@@ -18,8 +18,6 @@ import (
 )
 
 var (
-	panelStyle        = common.PanelStyle
-	activePanelStyle  = common.ActivePanelStyle
 	headerStyle       = common.HeaderStyle
 	playingIconStyle  = common.PlayingIconStyle
 	pausedIconStyle   = common.PausedIconStyle

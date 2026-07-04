@@ -32,6 +32,10 @@ type Library struct {
 var libPanel = lipgloss.NewStyle().
 	Border(lipgloss.RoundedBorder())
 
+var libActivePanel = lipgloss.NewStyle().
+	Border(lipgloss.RoundedBorder()).
+	BorderForeground(lipgloss.Color("#7D56F4"))
+
 func (l *Library) SetData(data LibData) {
 	l.entries = data.Entries
 	l.title = data.Title
@@ -78,7 +82,7 @@ func (l Library) buildLibBlock() string {
 		name := e.Name
 		runes := []rune(name)
 		if len(runes) > nameMax {
-			name = string(runes[:nameMax-1]) + "…"
+			name = string(runes[:nameMax-3]) + "…"
 		}
 		lines = append(lines, fmt.Sprintf("%s%s %s", prefix, icon, name))
 	}
@@ -88,7 +92,11 @@ func (l Library) buildLibBlock() string {
 
 func (l Library) View() string {
 	content := l.buildLibBlock()
-	return libPanel.
+	style := libPanel
+	if l.active {
+		style = libActivePanel
+	}
+	return style.
 		Width(l.width).
 		Height(l.height).
 		Render(content)
