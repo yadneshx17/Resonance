@@ -5,14 +5,6 @@ import (
 )
 
 var (
-	PanelStyle = lipgloss.NewStyle()
-	// Padding(0, 1)
-
-	ActivePanelStyle = lipgloss.NewStyle().
-				Border(lipgloss.NormalBorder()).
-				BorderForeground(lipgloss.Color("#7D56F4")).
-				Padding(0, 1)
-
 	HeaderStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("#7D56F4"))

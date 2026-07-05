@@ -25,6 +25,9 @@ var (
 	cursorStyle       = common.CursorStyle
 )
 
+const bgColor = "\x1b[48;2;26;27;56m"
+const bgReset = "\x1b[49m"
+
 const (
 	setupWelcome = iota
 	setupInput
@@ -100,6 +103,30 @@ func Run() {
 
 func (m model) Init() tea.Cmd {
 	return nil
+}
+
+func (m model) fillBg(content string) string {
+	w := m.width
+	h := m.height
+	if w < 1 {
+		w = 80
+	}
+	if h < 1 {
+		h = 24
+	}
+	lines := strings.Split(content, "\n")
+	out := make([]string, 0, h)
+	for _, line := range lines {
+		lw := lipgloss.Width(line)
+		if lw < w {
+			line += strings.Repeat(" ", w-lw)
+		}
+		out = append(out, bgColor+line+bgReset)
+	}
+	for len(out) < h {
+		out = append(out, bgColor+strings.Repeat(" ", w)+bgReset)
+	}
+	return strings.Join(out, "\n")
 }
 
 func (m model) visibleRows() int {
@@ -439,7 +466,7 @@ func (m model) setupView() tea.View {
 
 	return tea.View{
 		AltScreen: true,
-		Content:   s,
+		Content:   m.fillBg(s),
 	}
 }
 
@@ -461,9 +488,10 @@ func (m model) View() tea.View {
 		}
 
 		s := fmt.Sprintf("Terminal size too small\nWidth = %s  Height = %s\n\nNeeded for current config\nWidth >= 60, Height >= 24", wStr, hStr)
+		placed := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, s)
 		return tea.View{
 			AltScreen: true,
-			Content:   lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, s),
+			Content:   m.fillBg(placed),
 		}
 	}
 
@@ -496,6 +524,7 @@ func (m model) View() tea.View {
 		Title:   m.browser.CurrentName(),
 		Cursor:  m.libCursor,
 		Offset:  libOffset,
+		Total:   len(m.browser.Entries),
 		Active:  m.active == "library",
 		Width:   sideWidth,
 		Height:  mainHeight,
@@ -521,6 +550,7 @@ func (m model) View() tea.View {
 		Playing:    m.player.State() != playback.Stopped,
 		Cursor:     m.queueCursor,
 		Offset:     queueOffset,
+		Total:      m.queue.Len(),
 		Active:     m.active == "queue",
 		Width:      queueWidth,
 		Height:     mainHeight,
@@ -581,6 +611,6 @@ func (m model) View() tea.View {
 
 	return tea.View{
 		AltScreen: true,
-		Content:   s,
+		Content:   m.fillBg(s),
 	}
 }

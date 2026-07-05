@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"charm.land/lipgloss/v2"
 	"github.com/yadneshx17/resonance/internal/common"
+	"github.com/yadneshx17/resonance/internal/renderer"
 	"github.com/yadneshx17/resonance/internal/types"
 )
 
@@ -14,6 +14,7 @@ type LibData struct {
 	Title   string
 	Cursor  int
 	Offset  int
+	Total   int
 	Active  bool
 	Height  int
 	Width   int
@@ -24,23 +25,18 @@ type Library struct {
 	title     string
 	libCursor int
 	libOffset int
+	total     int
 	active    bool
 	height    int
 	width     int
 }
-
-var libPanel = lipgloss.NewStyle().
-	Border(lipgloss.RoundedBorder())
-
-var libActivePanel = lipgloss.NewStyle().
-	Border(lipgloss.RoundedBorder()).
-	BorderForeground(lipgloss.Color("#7D56F4"))
 
 func (l *Library) SetData(data LibData) {
 	l.entries = data.Entries
 	l.title = data.Title
 	l.libCursor = data.Cursor
 	l.libOffset = data.Offset
+	l.total = data.Total
 	l.active = data.Active
 	l.height = data.Height
 	l.width = data.Width
@@ -50,21 +46,11 @@ func (l Library) buildLibBlock() string {
 	if l.width < 4 {
 		return ""
 	}
-	var s string
-	s += common.HeaderStyle.Render("Library: "+l.title) + "\n"
-
-	var bar string
-	for i := 0; i < l.width-2; i++ {
-    	bar += "─"
-	}
-	s += bar + "\n"
-
 	if len(l.entries) == 0 {
-		s += " Empty\n"
-		return s
+		return " Empty"
 	}
-	contentWidth := l.width - 2 // 2 borders
-	nameMax := contentWidth - 5 // prefix + "" + icon + ""
+	contentWidth := l.width - 4
+	nameMax := contentWidth - 5
 	if nameMax < 1 {
 		nameMax = 1
 	}
@@ -82,22 +68,25 @@ func (l Library) buildLibBlock() string {
 		name := e.Name
 		runes := []rune(name)
 		if len(runes) > nameMax {
-			name = string(runes[:nameMax-3]) + "…"
+			name = string(runes[:nameMax-1]) + "…"
 		}
 		lines = append(lines, fmt.Sprintf("%s%s %s", prefix, icon, name))
 	}
-	s += strings.Join(lines, "\n")
-	return s
+	return strings.Join(lines, "\n")
 }
 
 func (l Library) View() string {
 	content := l.buildLibBlock()
-	style := libPanel
-	if l.active {
-		style = libActivePanel
+	pos := l.libCursor + 1
+	if l.total == 0 {
+		pos = 0
 	}
-	return style.
-		Width(l.width).
-		Height(l.height).
-		Render(content)
+	info := []string{fmt.Sprintf("%d of %d", pos, l.total)}
+	return renderer.Render(content, renderer.Config{
+		Width:     l.width,
+		Height:    l.height,
+		Title:     "Library - " + l.title,
+		InfoItems: info,
+		Active:    l.active,
+	})
 }

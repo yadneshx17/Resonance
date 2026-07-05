@@ -3,7 +3,7 @@ package components
 import (
 	"time"
 
-	"charm.land/lipgloss/v2"
+	"github.com/yadneshx17/resonance/internal/renderer"
 )
 
 type VisualData struct {
@@ -28,9 +28,6 @@ type Visual struct {
 	width     int
 }
 
-var visualStyle = lipgloss.NewStyle().
-	Border(lipgloss.RoundedBorder())
-
 func (v *Visual) SetData(data VisualData) {
 	v.trackName = data.TrackName
 	v.stateIcon = data.StateIcon
@@ -43,10 +40,10 @@ func (v *Visual) SetData(data VisualData) {
 }
 
 func (v *Visual) View() string {
-	return visualStyle.
-		Width(v.width).
-		Height(v.height).
-		Align(lipgloss.Center).
-		AlignVertical(lipgloss.Center).
-		Render(v.stateIcon + " " + v.trackName)
+	return renderer.Render(v.stateIcon+" "+v.trackName, renderer.Config{
+		Width:  v.width,
+		Height: v.height,
+		Title:  "Visualizer",
+		Active: false,
+	})
 }
