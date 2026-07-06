@@ -26,7 +26,6 @@ var (
 )
 
 const bgColor = "\x1b[48;2;26;27;56m"
-const bgReset = "\x1b[49m"
 
 const (
 	setupWelcome = iota
@@ -117,14 +116,16 @@ func (m model) fillBg(content string) string {
 	lines := strings.Split(content, "\n")
 	out := make([]string, 0, h)
 	for _, line := range lines {
+		line = strings.ReplaceAll(line, "\x1b[m", "\x1b[m"+bgColor)
+		line = strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+bgColor)
 		lw := lipgloss.Width(line)
 		if lw < w {
 			line += strings.Repeat(" ", w-lw)
 		}
-		out = append(out, bgColor+line+bgReset)
+		out = append(out, bgColor+line)
 	}
 	for len(out) < h {
-		out = append(out, bgColor+strings.Repeat(" ", w)+bgReset)
+		out = append(out, bgColor+strings.Repeat(" ", w))
 	}
 	return strings.Join(out, "\n")
 }
@@ -149,7 +150,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.height = msg.Height
 		m.width = msg.Width
-		m.tooSmall = m.width < 60 || m.height < 24
+		m.tooSmall = m.width < 84 || m.height < 24
 
 	case tea.KeyPressMsg:
 		if m.setup {
@@ -487,7 +488,7 @@ func (m model) View() tea.View {
 			hStr = badStyle.Render(fmt.Sprintf("%d", m.height))
 		}
 
-		s := fmt.Sprintf("Terminal size too small\nWidth = %s  Height = %s\n\nNeeded for current config\nWidth >= 60, Height >= 24", wStr, hStr)
+		s := fmt.Sprintf("Terminal size too small\nWidth = %s  Height = %s\n\nNeeded for current config\nWidth >= 84, Height >= 24", wStr, hStr)
 		placed := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, s)
 		return tea.View{
 			AltScreen: true,

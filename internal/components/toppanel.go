@@ -22,7 +22,7 @@ func (t *Top) View(height, width int) string {
 	if t.trackCount == 1 {
 		left += "1 track"
 	} else {
-		left += fmt.Sprintf(" %d tracks", t.trackCount)
+		left += fmt.Sprintf(" ‣%d tracks", t.trackCount)
 	}
 	right := now.Format("  Monday, Jan 2  3:04 PM  ")
 

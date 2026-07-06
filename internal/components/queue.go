@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/yadneshx17/resonance/internal/common"
 	"github.com/yadneshx17/resonance/internal/renderer"
 	"github.com/yadneshx17/resonance/internal/types"
@@ -50,7 +51,8 @@ func (q Queue) buildQueueBlock() string {
 		return ""
 	}
 	if len(q.tracks) == 0 {
-		return " Empty"
+		style := lipgloss.NewStyle().Width(q.width - 4).Align(lipgloss.Center)
+		return style.Render("Nothing in Queue")
 	}
 	contentWidth := q.width - 4
 	nameMax := contentWidth - 2
@@ -72,7 +74,7 @@ func (q Queue) buildQueueBlock() string {
 		if idx == q.playingIdx && q.playing {
 			line = common.PlayingTrackStyle.Render(fmt.Sprintf("%s %s", common.Play, name))
 		} else if q.active && q.cursor == idx {
-			line = common.CursorStyle.Render(common.Cursor + " " + name)
+			line = common.CursorStyle.Render(common.Cursor + "" + name)
 		}
 		lines = append(lines, line)
 	}
