@@ -10,25 +10,29 @@ import (
 )
 
 type LibData struct {
-	Entries []types.Entry
-	Title   string
-	Cursor  int
-	Offset  int
-	Total   int
-	Active  bool
-	Height  int
-	Width   int
+	Entries     []types.Entry
+	Title       string
+	Cursor      int
+	Offset      int
+	Total       int
+	Active      bool
+	Height      int
+	Width       int
+	SearchMode  bool
+	SearchQuery string
 }
 
 type Library struct {
-	entries   []types.Entry
-	title     string
-	libCursor int
-	libOffset int
-	total     int
-	active    bool
-	height    int
-	width     int
+	entries     []types.Entry
+	title       string
+	libCursor   int
+	libOffset   int
+	total       int
+	active      bool
+	height      int
+	width       int
+	searchMode  bool
+	searchQuery string
 }
 
 func (l *Library) SetData(data LibData) {
@@ -40,21 +44,29 @@ func (l *Library) SetData(data LibData) {
 	l.active = data.Active
 	l.height = data.Height
 	l.width = data.Width
+	l.searchMode = data.SearchMode
+	l.searchQuery = data.SearchQuery
 }
 
 func (l Library) buildLibBlock() string {
 	if l.width < 4 {
 		return ""
 	}
+	contentWidth := l.width - 4
+	var lines []string
+	if l.searchMode {
+		lines = append(lines, common.SearchBar(l.searchQuery, contentWidth))
+	}
 	if len(l.entries) == 0 {
+		if l.searchMode {
+			return strings.Join(lines, "\n")
+		}
 		return " Empty"
 	}
-	contentWidth := l.width - 4
 	nameMax := contentWidth - 5
 	if nameMax < 1 {
 		nameMax = 1
 	}
-	var lines []string
 	for i, e := range l.entries {
 		idx := l.libOffset + i
 		prefix := "  "

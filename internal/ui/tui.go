@@ -25,7 +25,8 @@ var (
 	cursorStyle       = common.CursorStyle
 )
 
-const bgColor = "\x1b[48;2;26;27;56m"
+// const bgColor = "\x1b[48;2;26;27;56m" // background sequence
+const bgColor = "\x1b[48;2;30;30;46m"
 
 const (
 	setupWelcome = iota
@@ -47,15 +48,22 @@ type model struct {
 	width       int
 	tooSmall    bool
 
+	// Setup
 	setup      bool
 	setupState int
 	setupInput string
 
+	// Componnets
 	top          *components.Top
 	libraryPanel *components.Library
 	visual       *components.Visual
 	queuePanel   *components.Queue
 	footer       *components.Footer
+
+	// Search
+	searchMode  bool
+	searchQuery string
+	searchIdx   []int
 }
 
 type (
@@ -158,6 +166,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return mm, cmd
 		}
 
+		// Search mode intercepts printable keys first
+		if m.searchMode {
+			switch msg.String() {
+			case "esc":
+				m.searchMode = false
+				m.searchQuery = ""
+				return m, nil
+			case "backspace":
+				if len(m.searchQuery) > 0 {
+					runes := []rune(m.searchQuery)
+					m.searchQuery = string(runes[:len(runes)-1])
+					m.rebuildSearch()
+				}
+				return m, nil
+			default:
+				if len(msg.String()) == 1 {
+					m.searchQuery += msg.String()
+					m.rebuildSearch()
+					return m, nil
+				}
+			}
+		}
+
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -169,8 +200,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "left":
 			m.active = "library"
+			m.searchQuery = ""
 		case "right":
 			m.active = "queue"
+			m.searchQuery = ""
 		case "up", "k":
 			if m.active == "library" {
 				if m.libCursor > 0 {
@@ -188,21 +221,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			vis := m.visibleRows()
 			if m.active == "library" {
-				if m.libCursor < len(m.browser.Entries)-1 {
+				maxLen := len(m.browser.Entries)
+				if m.searchMode {
+					maxLen = len(m.searchIdx)
+				}
+				if m.libCursor < maxLen-1 {
 					m.libCursor++
 				}
 				if m.libCursor >= m.libOffset+vis {
 					m.libOffset = m.libCursor - vis + 1
 				}
-			} else if m.queueCursor < m.queue.Len()-1 {
-				m.queueCursor++
+			} else if m.active == "queue" {
+				maxLen := m.queue.Len()
+				if m.searchMode {
+					maxLen = len(m.searchIdx)
+				}
+				if m.queueCursor < maxLen-1 {
+					m.queueCursor++
+				}
 				if m.queueCursor >= m.queueOffset+vis {
 					m.queueOffset = m.queueCursor - vis + 1
 				}
 			}
 		case "a":
 			if m.active == "library" && len(m.browser.Entries) > 0 {
-				entry := m.browser.Entries[m.libCursor]
+				idx := m.libCursor
+				if m.searchMode && idx < len(m.searchIdx) {
+					idx = m.searchIdx[idx]
+				}
+				entry := m.browser.Entries[idx]
 				if entry.IsDir {
 					tracks, _ := m.queue.ScanDir(entry.Path)
 					for _, t := range tracks {
@@ -221,7 +268,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "d":
 			if m.active == "queue" && m.queue.Len() > 0 {
-				m.queue.Remove(m.queueCursor)
+				idx := m.queueCursor
+				if m.searchMode && idx < len(m.searchIdx) {
+					idx = m.searchIdx[idx]
+				}
+				m.queue.Remove(idx)
 				if m.queueCursor >= m.queue.Len() {
 					m.queueCursor = max(0, m.queue.Len()-1)
 				}
@@ -237,11 +288,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			if m.active == "library" && len(m.browser.Entries) > 0 {
-				entry := m.browser.Entries[m.libCursor]
+				idx := m.libCursor
+				if m.searchMode && idx < len(m.searchIdx) {
+					idx = m.searchIdx[idx]
+				}
+				entry := m.browser.Entries[idx]
 				if entry.IsDir {
-					m.browser.Open(m.libCursor)
+					m.browser.Open(idx)
 					m.libCursor = 0
 					m.libOffset = 0
+					m.searchMode = false
+					m.searchQuery = ""
 				} else {
 					m.playingID++
 					m.errMsg = ""
@@ -260,10 +317,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
 				}
 			} else if m.active == "queue" && m.queue.Len() > 0 {
+				idx := m.queueCursor
+				if m.searchMode && idx < len(m.searchIdx) {
+					idx = m.searchIdx[idx]
+				}
 				m.playingID++
 				m.errMsg = ""
 				m.player.Stop()
-				m.queue.SetCurrent(m.queueCursor)
+				m.queue.SetCurrent(idx)
 				vis := m.visibleRows()
 				if m.queueCursor < m.queueOffset {
 					m.queueOffset = m.queueCursor
@@ -271,7 +332,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.queueOffset = m.queueCursor - vis + 1
 				}
 				tracks := m.queue.List()
-				track := tracks[m.queueCursor]
+				track := tracks[idx]
 				if err := m.player.Load(track); err != nil {
 					m.errMsg = fmt.Sprintf("Error: %v", err)
 					return m, nil
@@ -336,6 +397,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.player.Unmute()
 			} else {
 				m.player.Mute()
+			}
+		case "/":
+			if !m.searchMode {
+				m.searchMode = true
+				m.searchQuery = ""
+				return m, nil
 			}
 		}
 
@@ -431,6 +498,46 @@ func (m *model) finishSetup(path string) {
 	m.errMsg = ""
 }
 
+func (m *model) rebuildSearch() {
+	if m.searchQuery == "" {
+		m.searchIdx = nil
+		return
+	}
+	var src []string // names from either browser enteries or queue strings
+	if m.active == "library" {
+		for _, e := range m.browser.Entries {
+			src = append(src, e.Name)
+		}
+	} else {
+		for _, t := range m.queue.List() {
+			name := t.Path
+			if slash := strings.LastIndexByte(t.Path, '/'); slash >= 0 {
+				name = t.Path[slash+1:]
+			}
+			src = append(src, name)
+		}
+	}
+
+	m.searchIdx = nil
+	for i, name := range src {
+		if common.FuzzyMatch(m.searchQuery, name) {
+			m.searchIdx = append(m.searchIdx, i)
+		}
+	}
+
+	if len(m.searchIdx) == 0 {
+		return
+	}
+
+	// clamping of cursor
+	if m.active == "library" && m.libCursor >= len(m.searchIdx) {
+		m.libCursor = len(m.searchIdx) - 1
+	}
+	if m.active == "queue" && m.queueCursor >= len(m.searchIdx) {
+		m.queueCursor = len(m.searchIdx) - 1
+	}
+}
+
 func waitForSongEnd(player *playback.Player, id int) tea.Cmd {
 	return func() tea.Msg {
 		player.Wait()
@@ -507,6 +614,13 @@ func (m model) View() tea.View {
 
 	vis := m.visibleRows()
 	entries := m.browser.Entries
+	if m.searchMode && m.active == "library" && len(m.searchIdx) < len(entries) {
+		filtered := make([]types.Entry, len(m.searchIdx))
+		for i, idx := range m.searchIdx {
+			filtered[i] = entries[idx]
+		}
+		entries = filtered
+	}
 	libSlice := entries
 	libOffset := 0
 	if len(entries) > vis {
@@ -521,17 +635,27 @@ func (m model) View() tea.View {
 		libOffset = off
 	}
 	m.libraryPanel.SetData(components.LibData{
-		Entries: libSlice,
-		Title:   m.browser.CurrentName(),
-		Cursor:  m.libCursor,
-		Offset:  libOffset,
-		Total:   len(m.browser.Entries),
-		Active:  m.active == "library",
-		Width:   sideWidth,
-		Height:  mainHeight,
+		Entries:     libSlice,
+		Title:       m.browser.CurrentName(),
+		Cursor:      m.libCursor,
+		Offset:      libOffset,
+		Total:       len(m.browser.Entries),
+		Active:      m.active == "library",
+		Width:       sideWidth,
+		Height:      mainHeight,
+		SearchMode:  m.searchMode && m.active == "library",
+		SearchQuery: m.searchQuery,
 	})
 
+	// queue
 	tracks := m.queue.List()
+	if m.searchMode && m.active == "queue" && len(m.searchIdx) < len(tracks) {
+		filtered := make([]types.Track, len(m.searchIdx))
+		for i, idx := range m.searchIdx {
+			filtered[i] = tracks[idx]
+		}
+		tracks = filtered
+	}
 	queueSlice := tracks
 	queueOffset := 0
 	if len(tracks) > vis {
@@ -546,15 +670,17 @@ func (m model) View() tea.View {
 		queueOffset = off
 	}
 	m.queuePanel.SetData(components.QueueData{
-		Tracks:     queueSlice,
-		PlayingIdx: m.queue.CurrentIndex(),
-		Playing:    m.player.State() != playback.Stopped,
-		Cursor:     m.queueCursor,
-		Offset:     queueOffset,
-		Total:      m.queue.Len(),
-		Active:     m.active == "queue",
-		Width:      queueWidth,
-		Height:     mainHeight,
+		Tracks:      queueSlice,
+		PlayingIdx:  m.queue.CurrentIndex(),
+		Playing:     m.player.State() != playback.Stopped,
+		Cursor:      m.queueCursor,
+		Offset:      queueOffset,
+		Total:       m.queue.Len(),
+		Active:      m.active == "queue",
+		Width:       queueWidth,
+		Height:      mainHeight,
+		SearchMode:  m.searchMode && m.active == "queue",
+		SearchQuery: m.searchQuery,
 	})
 
 	track := m.player.CurrentTrack()
@@ -567,9 +693,9 @@ func (m model) View() tea.View {
 	var stateIcon string
 	switch m.player.State() {
 	case playback.Playing:
-		stateIcon = 	playingIconStyle.Render(common.Play)
+		stateIcon = playingIconStyle.Render(common.Play)
 	case playback.Paused:
-		stateIcon = 		pausedIconStyle.Render(common.Pause)
+		stateIcon = pausedIconStyle.Render(common.Pause)
 	default:
 		stateIcon = common.MusicNote
 	}

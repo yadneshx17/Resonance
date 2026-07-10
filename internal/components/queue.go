@@ -11,27 +11,31 @@ import (
 )
 
 type QueueData struct {
-	Tracks     []types.Track
-	PlayingIdx int
-	Playing    bool
-	Cursor     int
-	Offset     int
-	Total      int
-	Active     bool
-	Height     int
-	Width      int
+	Tracks      []types.Track
+	PlayingIdx  int
+	Playing     bool
+	Cursor      int
+	Offset      int
+	Total       int
+	Active      bool
+	Height      int
+	Width       int
+	SearchMode  bool
+	SearchQuery string
 }
 
 type Queue struct {
-	tracks     []types.Track
-	playingIdx int
-	playing    bool
-	cursor     int
-	offset     int
-	total      int
-	active     bool
-	height     int
-	width      int
+	tracks      []types.Track
+	playingIdx  int
+	playing     bool
+	cursor      int
+	offset      int
+	total       int
+	active      bool
+	height      int
+	width       int
+	searchMode  bool
+	searchQuery string
 }
 
 func (q *Queue) SetData(data QueueData) {
@@ -44,22 +48,30 @@ func (q *Queue) SetData(data QueueData) {
 	q.active = data.Active
 	q.height = data.Height
 	q.width = data.Width
+	q.searchMode = data.SearchMode
+	q.searchQuery = data.SearchQuery
 }
 
 func (q Queue) buildQueueBlock() string {
 	if q.width < 4 {
 		return ""
 	}
+	contentWidth := q.width - 4
+	var lines []string
+	if q.searchMode {
+		lines = append(lines, common.SearchBar(q.searchQuery, contentWidth))
+	}
 	if len(q.tracks) == 0 {
-		style := lipgloss.NewStyle().Width(q.width - 4).Align(lipgloss.Center)
+		if q.searchMode {
+			return strings.Join(lines, "\n")
+		}
+		style := lipgloss.NewStyle().Width(contentWidth).Align(lipgloss.Center)
 		return style.Render("Nothing in Queue")
 	}
-	contentWidth := q.width - 4
 	nameMax := contentWidth - 2
 	if nameMax < 1 {
 		nameMax = 1
 	}
-	var lines []string
 	for i, t := range q.tracks {
 		idx := q.offset + i
 		name := t.Path

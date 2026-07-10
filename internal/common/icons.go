@@ -60,6 +60,7 @@ var (
 	Lyrics      = "\U000f0367" // Printable Rune : "󰍧"
 	SearchMusic = "\U000f1883" // Printable Rune : "󱢃"
 
+	Search = "\ue68f" // Printable Rune : ""
 )
 
 var Icons = map[string]Style{
