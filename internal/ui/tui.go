@@ -404,6 +404,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.searchQuery = ""
 				return m, nil
 			}
+		case "<":
+			if m.player.State() != playback.Stopped {
+				pos := m.player.Position()
+				dur := m.player.Duration()
+				newPos := pos - 5*time.Second
+				if newPos < 0 {
+					newPos = dur
+				}
+				m.player.Seek(newPos)
+			}
+		case ">":
+			if m.player.State() != playback.Stopped {
+				pos := m.player.Position()
+				dur := m.player.Duration()
+				newPos := pos + 5*time.Second
+				if newPos > dur {
+					newPos = dur
+				}
+				m.player.Seek(newPos)
+			}
 		}
 
 	case tickMsg:

@@ -188,7 +188,10 @@ func (p *Player) Seek(position time.Duration) error {
 		return fmt.Errorf("no track loaded")
 	}
 	posi := p.format.SampleRate.N(position)
-	return p.streamer.Seek(posi)
+	speaker.Lock()
+	err := p.streamer.Seek(posi)
+	speaker.Unlock()
+	return err
 }
 
 func (p *Player) Duration() time.Duration {
