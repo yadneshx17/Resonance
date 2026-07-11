@@ -21,9 +21,9 @@ func Render(content string, cfg Config) string {
 		return content
 	}
 
-	r, g, b := 136, 136, 136
+	r, g, b := 69, 71, 90
 	if cfg.Active {
-		r, g, b = 125, 86, 244
+		r, g, b = 166, 227, 161
 	}
 	bc := fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r, g, b)
 	nc := "\x1b[39m"
@@ -70,7 +70,7 @@ func Render(content string, cfg Config) string {
 			}
 		}
 		// bottom += "╰" + strings.Repeat("─", bd) + "┤" + info + "├
-		bottom += "╰" + strings.Repeat("─", bd) + " " + info + " " +"╯"
+		bottom += "╰" + strings.Repeat("─", bd) + " " + info + " " + "╯"
 	} else {
 		bottom += "╰" + strings.Repeat("─", w-2) + "╯"
 	}
@@ -80,4 +80,3 @@ func Render(content string, cfg Config) string {
 	all = append(all, bottom)
 	return strings.Join(all, "\n")
 }
-

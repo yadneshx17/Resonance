@@ -18,7 +18,6 @@ import (
 )
 
 var (
-	headerStyle       = common.HeaderStyle
 	playingIconStyle  = common.PlayingIconStyle
 	pausedIconStyle   = common.PausedIconStyle
 	playingTrackStyle = common.PlayingTrackStyle

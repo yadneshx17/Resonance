@@ -39,7 +39,7 @@ func (t *Top) View(height, width int) string {
 	style := lipgloss.NewStyle().
 		Bold(true).
 		Italic(true).
-		Foreground(lipgloss.Color("#ffffff")).
+		Foreground(lipgloss.Color("#CDD6F4")).
 		Height(height).
 		Width(width)
 	return style.Render(left + fill + right)

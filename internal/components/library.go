@@ -69,10 +69,6 @@ func (l Library) buildLibBlock() string {
 	}
 	for i, e := range l.entries {
 		idx := l.libOffset + i
-		prefix := "  "
-		if l.active && l.libCursor == idx {
-			prefix = common.CursorStyle.Render(common.Cursor)
-		}
 		icon := common.Music
 		if e.IsDir {
 			icon = common.Directory
@@ -82,7 +78,13 @@ func (l Library) buildLibBlock() string {
 		if len(runes) > nameMax {
 			name = string(runes[:nameMax-1]) + "…"
 		}
-		lines = append(lines, fmt.Sprintf("%s%s %s", prefix, icon, name))
+		line := icon + " " + name
+		if l.active && l.libCursor == idx {
+			line = common.CursorStyle.Render(common.Cursor + " " + line)
+		} else {
+			line = "  " + line
+		}
+		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
 }

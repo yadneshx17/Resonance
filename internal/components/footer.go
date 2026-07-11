@@ -74,6 +74,8 @@ func (f Footer) buildFooterBlock() string {
 		barWidth = 0
 	}
 	bar := common.ProgressBar(f.position, f.duration, barWidth)
+	barStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#89DCEB"))
+	bar = barStyle.Render(bar)
 	progressLine := bar
 	if timeStr != "" {
 		if bar != "" {
@@ -90,7 +92,8 @@ func (f Footer) buildFooterBlock() string {
 	}
 	volStr := ""
 	if f.muted {
-		volStr = "[MUTE]"
+		mutedStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F38BA8"))
+		volStr = mutedStyle.Render("[MUTED]")
 	} else {
 		volIcon := common.VolumeLow
 		if volPct > 33 {

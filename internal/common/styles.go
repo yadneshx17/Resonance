@@ -5,23 +5,19 @@ import (
 )
 
 var (
-	HeaderStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#7D56F4"))
-
 	PlayingIconStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("#00FF00"))
+				Foreground(lipgloss.Color("#A6E3A1"))
 
 	PausedIconStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFD700"))
+			Foreground(lipgloss.Color("#F5E0DC"))
 
 	PlayingTrackStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("#20002F")).
-				Background(lipgloss.Color("#F5F5DC"))
+				Foreground(lipgloss.Color("#A6E3A1")).
+				Background(lipgloss.Color("#1E1E2E"))
 
 	CursorStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#FFD700"))
+			Foreground(lipgloss.Color("#CBA6F7"))
 )
