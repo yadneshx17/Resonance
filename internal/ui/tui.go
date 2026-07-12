@@ -571,29 +571,49 @@ func tick() tea.Cmd {
 }
 
 func (m model) setupView() tea.View {
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#B4BEFE"))
+	normalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#CDD6F4"))
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086"))
+	errorStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F38BA8"))
+	optionStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#45475A")).
+		Padding(0, 2).
+		Foreground(lipgloss.Color("#CDD6F4"))
+	inputStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#89B4FA")).
+		Padding(0, 1).
+		Bold(true).
+		Foreground(lipgloss.Color("#CDD6F4")).
+		Width(50)
+
 	var s string
-	s += "Welcome to Resonance 🎵\n\n"
-	s += "No music library configured.\n\n"
+	s += titleStyle.Render("Welcome to Resonance") + "\n\n"
+	s += normalStyle.Render("No music library configured.") + "\n\n"
 
 	if m.errMsg != "" {
-		s += fmt.Sprintf("Error: %s\n\n", m.errMsg)
+		s += errorStyle.Render(common.Error+" "+m.errMsg) + "\n\n"
 	}
 
 	switch m.setupState {
 	case setupWelcome:
-		s += "Press 1 to use ~/Music\n"
-		s += "Press 2 to enter a custom path\n\n"
-		s += "q:Quit"
+		opt1 := optionStyle.Render("[1]  " + common.Directory + "  ~/Music")
+		opt2 := optionStyle.Render("[2]  " + common.Search + "  Custom path")
+		s += opt1 + "\n" + opt2 + "\n\n"
+		s += keyStyle.Render("  q  quit")
 
 	case setupInput:
-		s += "Enter music directory path:\n"
-		s += "> " + m.setupInput + "█\n\n"
-		s += "Enter:Confirm  Esc:Cancel"
+		s += normalStyle.Render("Enter music directory path:") + "\n\n"
+		inputLine := "> " + m.setupInput + "█"
+		s += inputStyle.Render(inputLine) + "\n\n"
+		s += keyStyle.Render("  " + common.Confirm + " confirm    " + common.Cancel + " cancel")
 	}
 
+	box := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, s)
 	return tea.View{
 		AltScreen: true,
-		Content:   m.fillBg(s),
+		Content:   m.fillBg(box),
 	}
 }
 

@@ -61,6 +61,15 @@ var (
 	SearchMusic = "\U000f1883" // Printable Rune : "󱢃"
 
 	Search = "\ue68f" // Printable Rune : ""
+
+	// Status
+	Error    = "\uf06a" // Printable Rune : ""
+	Check    = "\uf00c" // Printable Rune : ""
+	Question = "\uf128" // Printable Rune : ""
+
+	// Keys
+	Confirm = "↵" // Printable Rune : "↵"
+	Cancel  = "⎋" // Printable Rune : "⎋"
 )
 
 var Icons = map[string]Style{
