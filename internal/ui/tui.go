@@ -786,6 +786,11 @@ func (m model) View() tea.View {
 			m.queuePanel.View(),
 		),
 		m.footer.View(),
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6C7086")).
+			Width(m.width).
+			Align(lipgloss.Right).
+			Render("?  help"),
 	)
 
 	if m.showHelp {
@@ -803,7 +808,7 @@ func (m model) helpView() string {
 	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#B4BEFE"))
 	sep := lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086")).Render("│")
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086"))
-	header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#89B4FA"))
+	header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#A6E3A1"))
 
 	groups := []struct {
 		section string
