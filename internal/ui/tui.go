@@ -63,6 +63,9 @@ type model struct {
 	searchMode  bool
 	searchQuery string
 	searchIdx   []int
+
+	// Help
+	showHelp bool
 }
 
 type (
@@ -163,6 +166,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.setup {
 			mm, cmd := m.handleSetupKey(msg)
 			return mm, cmd
+		}
+
+		if m.showHelp {
+			switch msg.String() {
+			case "?", "esc", "q":
+				m.showHelp = false
+			}
+			return m, nil
 		}
 
 		// Search mode intercepts printable keys first
@@ -423,6 +434,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.player.Seek(newPos)
 			}
+		case "?":
+			m.showHelp = !m.showHelp
 		}
 
 	case tickMsg:
@@ -775,8 +788,88 @@ func (m model) View() tea.View {
 		m.footer.View(),
 	)
 
+	if m.showHelp {
+		s = m.helpView()
+	}
+
 	return tea.View{
 		AltScreen: true,
 		Content:   m.fillBg(s),
 	}
+}
+
+func (m model) helpView() string {
+	helpW := 54
+	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#B4BEFE"))
+	sep := lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086")).Render("│")
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086"))
+	header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#89B4FA"))
+
+	groups := []struct {
+		section string
+		items   [][2]string
+	}{
+		{"Navigation", [][2]string{
+			{"↑ / k , ↓ / j", "Move cursor"},
+			{"Tab  ←  →", "Switch panel"},
+			{"Enter (dir)", "Open directory"},
+			{"Enter (track)", "Play track"},
+			{"Backspace / h", "Parent directory"},
+		}},
+		{"Search", [][2]string{
+			{"/", "Enter search mode"},
+			{"Esc", "Exit search"},
+			{"Backspace", "Delete character"},
+		}},
+		{"Queue", [][2]string{
+			{"a (track)", "Add to queue"},
+			{"a (dir)", "Add all from dir"},
+			{"A", "Add all current dir"},
+			{"d", "Remove from queue"},
+		}},
+		{"Playback", [][2]string{
+			{"Space", "Pause / Resume"},
+			{"n , p", "Next / Previous track"},
+			{"[ , ]", "Volume down / up"},
+			{"m", "Mute / Unmute"},
+			{"< , >", "Seek -5s / +5s"},
+		}},
+		{"General", [][2]string{
+			{"q / Ctrl+C", "Quit"},
+			{"?", "Close this help"},
+		}},
+	}
+
+	// find the longest key across all groups
+	maxKeyW := 0
+	for _, g := range groups {
+		for _, item := range g.items {
+			if w := lipgloss.Width(item[0]); w > maxKeyW {
+				maxKeyW = w
+			}
+		}
+	}
+
+	var b strings.Builder
+	for _, g := range groups {
+		b.WriteString(header.Render(g.section) + "\n")
+		for _, item := range g.items {
+			key := item[0]
+			padded := key + strings.Repeat(" ", maxKeyW-lipgloss.Width(key))
+			line := fmt.Sprintf("  %s  %s  %s", keyStyle.Render(padded), sep, item[1])
+			b.WriteString(line + "\n")
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString(dim.Render("  ? or Esc to close"))
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#45475A")).
+		Padding(1, 3).
+		Width(helpW).
+		Render(b.String())
+
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
 }

@@ -104,7 +104,6 @@ func (f Footer) buildFooterBlock() string {
 		}
 		volStr = fmt.Sprintf("%svol: %d%%", volIcon, volPct)
 	}
-	// controlsLine := fmt.Sprintf("%s  %s  %s  │  %s", common.PrevTrack, f.stateIcon, common.NextTrack, volStr)
 	controlsLine := fmt.Sprintf("%s", volStr)
 
 	return strings.Join([]string{info, progressLine, controlsLine}, "\n")
