@@ -90,9 +90,7 @@ The separation is designed so that the playback engine can be driven by any fron
 
 ## Screenshots
 
-![Main UI](assets/main.png)
-
-*(Screenshot to be added.)*
+![Main UI](assets/resonance.png)
 
 ---
 
