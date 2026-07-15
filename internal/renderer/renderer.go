@@ -3,8 +3,10 @@ package renderer
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-runewidth"
 )
 
 type Config struct {
@@ -13,6 +15,36 @@ type Config struct {
 	Title     string
 	InfoItems []string
 	Active    bool
+}
+
+// truncateCells truncates s to at most maxCells visible cells preserving ANSI.
+func truncateCells(s string, maxCells int) string {
+	if maxCells < 1 {
+		return ""
+	}
+	cells := 0
+	ri := 0
+	for ri < len(s) {
+		r, size := utf8.DecodeRuneInString(s[ri:])
+		if r == '\x1b' {
+			ri += size
+			for ri < len(s) {
+				b := s[ri]
+				ri++
+				if b == 'm' {
+					break
+				}
+			}
+			continue
+		}
+		w := runewidth.RuneWidth(r)
+		if cells+w > maxCells {
+			return s[:ri] + "…"
+		}
+		cells += w
+		ri += size
+	}
+	return s
 }
 
 func Render(content string, cfg Config) string {
@@ -42,8 +74,7 @@ func Render(content string, cfg Config) string {
 	for _, line := range lines {
 		lw := lipgloss.Width(line)
 		if lw > cw {
-			runes := []rune(line)
-			line = string(runes[:cw-1]) + "…"
+			line = truncateCells(line, cw)
 		} else if lw < cw {
 			line += strings.Repeat(" ", cw-lw)
 		}
@@ -61,15 +92,13 @@ func Render(content string, cfg Config) string {
 		iw := lipgloss.Width(info)
 		bd := w - 4 - iw
 		if bd < 0 {
-			runes := []rune(info)
-			info = string(runes[:w-8]) + "…"
+			info = truncateCells(info, w-8)
 			iw = lipgloss.Width(info)
 			bd = w - 6 - iw
 			if bd < 0 {
 				bd = 0
 			}
 		}
-		// bottom += "╰" + strings.Repeat("─", bd) + "┤" + info + "├
 		bottom += "╰" + strings.Repeat("─", bd) + " " + info + " " + "╯"
 	} else {
 		bottom += "╰" + strings.Repeat("─", w-2) + "╯"

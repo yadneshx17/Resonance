@@ -20,19 +20,21 @@ type LibData struct {
 	Width       int
 	SearchMode  bool
 	SearchQuery string
+	SelectedPath string
 }
 
 type Library struct {
-	entries     []types.Entry
-	title       string
-	libCursor   int
-	libOffset   int
-	total       int
-	active      bool
-	height      int
-	width       int
-	searchMode  bool
-	searchQuery string
+	entries      []types.Entry
+	title        string
+	libCursor    int
+	libOffset    int
+	total        int
+	active       bool
+	height       int
+	width        int
+	searchMode   bool
+	searchQuery  string
+	selectedPath string
 }
 
 func (l *Library) SetData(data LibData) {
@@ -46,6 +48,7 @@ func (l *Library) SetData(data LibData) {
 	l.width = data.Width
 	l.searchMode = data.SearchMode
 	l.searchQuery = data.SearchQuery
+	l.selectedPath = data.SelectedPath
 }
 
 func (l Library) buildLibBlock() string {
@@ -57,7 +60,13 @@ func (l Library) buildLibBlock() string {
 	if l.searchMode {
 		lines = append(lines, common.SearchBar(l.searchQuery, contentWidth))
 	}
-	if len(l.entries) == 0 {
+	dirs := make([]types.Entry, 0, len(l.entries))
+	for _, e := range l.entries {
+		if e.IsDir {
+			dirs = append(dirs, e)
+		}
+	}
+	if len(dirs) == 0 {
 		if l.searchMode {
 			return strings.Join(lines, "\n")
 		}
@@ -67,19 +76,18 @@ func (l Library) buildLibBlock() string {
 	if nameMax < 1 {
 		nameMax = 1
 	}
-	for i, e := range l.entries {
+	for i, e := range dirs {
 		idx := l.libOffset + i
-		icon := common.Music
-		if e.IsDir {
-			icon = common.Directory
-		}
 		name := e.Name
 		runes := []rune(name)
 		if len(runes) > nameMax {
 			name = string(runes[:nameMax-1]) + "…"
 		}
-		line := icon + " " + name
-		if l.active && l.libCursor == idx {
+		selected := l.selectedPath != "" && e.Path == l.selectedPath
+		line := common.Directory + " " + name
+		if selected {
+			line = common.PlayingTrackStyle.Render("▶ " + name)
+		} else if l.active && l.libCursor == idx {
 			line = common.CursorStyle.Render(common.Cursor + " " + line)
 		} else {
 			line = "  " + line
@@ -91,11 +99,17 @@ func (l Library) buildLibBlock() string {
 
 func (l Library) View() string {
 	content := l.buildLibBlock()
+	dirs := 0
+	for _, e := range l.entries {
+		if e.IsDir {
+			dirs++
+		}
+	}
 	pos := l.libCursor + 1
-	if l.total == 0 {
+	if dirs == 0 {
 		pos = 0
 	}
-	info := []string{fmt.Sprintf("%d of %d", pos, l.total)}
+	info := []string{fmt.Sprintf("%d of %d", pos, dirs)}
 	return renderer.Render(content, renderer.Config{
 		Width:     l.width,
 		Height:    l.height,

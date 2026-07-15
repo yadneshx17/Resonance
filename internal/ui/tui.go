@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -33,19 +34,23 @@ const (
 )
 
 type model struct {
-	player      *playback.Player
-	queue       *playback.Queue
-	browser     *library.Browser
-	libCursor   int
-	queueCursor int
-	libOffset   int
-	queueOffset int
-	active      string
-	playingID   int
-	errMsg      string
-	height      int
-	width       int
-	tooSmall    bool
+	player       *playback.Player
+	queue        *playback.Queue
+	browser      *library.Browser
+	libCursor    int
+	tracksCursor int
+	queueCursor  int
+	libOffset    int
+	tracksOffset int
+	queueOffset  int
+	active       string
+	playingID    int
+	errMsg       string
+	height       int
+	width        int
+	tooSmall     bool
+	selectedDir  string
+	fileEntries  []types.Entry
 
 	// Setup
 	setup      bool
@@ -55,7 +60,7 @@ type model struct {
 	// Componnets
 	top          *components.Top
 	libraryPanel *components.Library
-	visual       *components.Visual
+	tracksPanel  *components.Tracks
 	queuePanel   *components.Queue
 	footer       *components.Footer
 
@@ -82,7 +87,7 @@ func Run() {
 		width:        80,
 		top:          &components.Top{},
 		libraryPanel: &components.Library{},
-		visual:       &components.Visual{},
+		tracksPanel:  &components.Tracks{},
 		queuePanel:   &components.Queue{},
 		footer:       &components.Footer{},
 	}
@@ -101,6 +106,7 @@ func Run() {
 			os.Exit(1)
 		}
 		m.browser = b
+		m.selectDirAtCursor()
 	}
 
 	p := tea.NewProgram(m)
@@ -140,15 +146,97 @@ func (m model) fillBg(content string) string {
 	return strings.Join(out, "\n")
 }
 
+func (m model) browserDirs() []types.Entry {
+	var dirs []types.Entry
+	for _, e := range m.browser.Entries {
+		if e.IsDir {
+			dirs = append(dirs, e)
+		}
+	}
+	return dirs
+}
+
+func (m model) trackFileEntries() []types.Entry {
+	if m.fileEntries != nil {
+		return m.fileEntries
+	}
+	return m.browserFileEntries()
+}
+
+func (m model) browserFileEntries() []types.Entry {
+	var files []types.Entry
+	for _, e := range m.browser.Entries {
+		if !e.IsDir {
+			files = append(files, e)
+		}
+	}
+	return files
+}
+
+func loadDirFiles(dir string) []types.Entry {
+	items, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var entries []types.Entry
+	for _, item := range items {
+		if item.IsDir() || !strings.HasSuffix(strings.ToLower(item.Name()), ".mp3") {
+			continue
+		}
+		fullPath := filepath.Join(dir, item.Name())
+		meta, _ := common.ReadMetadata(fullPath)
+		entries = append(entries, types.Entry{
+			Name:     item.Name(),
+			Path:     fullPath,
+			Title:    meta.Title,
+			Artist:   meta.Artist,
+			Album:    meta.Album,
+			Duration: meta.Duration,
+			CoverArt: meta.CoverArt,
+		})
+	}
+	return entries
+}
+
+func (m model) libIdxFromCursor() int {
+	dirs := m.browserDirs()
+	if m.libCursor < len(dirs) {
+		entry := dirs[m.libCursor]
+		for i, e := range m.browser.Entries {
+			if e.Path == entry.Path {
+				return i
+			}
+		}
+	}
+	return 0
+}
+
+func (m *model) selectDirAtCursor() {
+	dirs := m.browserDirs()
+	idx := m.libCursor
+	if m.searchMode && m.active == "library" && m.libCursor < len(m.searchIdx) {
+		idx = m.searchIdx[m.libCursor]
+	}
+	if idx < len(dirs) {
+		sel := dirs[idx]
+		m.selectedDir = sel.Path
+		m.fileEntries = loadDirFiles(sel.Path)
+		m.tracksCursor = 0
+		m.tracksOffset = 0
+	}
+}
+
+func (m model) dirTrackCount() int {
+	return len(m.trackFileEntries())
+}
+
 func (m model) visibleRows() int {
 	if m.height == 0 {
 		return 20
 	}
-	// mainHeight = m.height - top(1) - playback(5)
-	// inside border = mainHeight - 2
-	// subtract 2 header lines (title + separator)
-	// = m.height - 6 - 2 - 2 = m.height - 10
-	n := m.height - 10
+	// mainHeight = m.height - top(1) - footer(11)
+	// trackVis = mainHeight - 2 = m.height - 14
+	n := m.height - 14
 	if n < 0 {
 		return 0
 	}
@@ -160,7 +248,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.height = msg.Height
 		m.width = msg.Width
-		m.tooSmall = m.width < 84 || m.height < 24
+		m.tooSmall = m.width < 84 || m.height < 28
 
 	case tea.KeyPressMsg:
 		if m.setup {
@@ -203,17 +291,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "tab":
-			if m.active == "library" {
+			switch m.active {
+			case "library":
+				m.active = "tracks"
+				m.searchMode = false
+				m.searchQuery = ""
+			case "tracks":
 				m.active = "queue"
-			} else {
+				m.searchMode = false
+				m.searchQuery = ""
+			default:
 				m.active = "library"
+				m.searchMode = false
+				m.searchQuery = ""
 			}
 		case "left":
-			m.active = "library"
-			m.searchQuery = ""
+			// used by l key for directory navigation
 		case "right":
-			m.active = "queue"
-			m.searchQuery = ""
+			// reserved
 		case "up", "k":
 			if m.active == "library" {
 				if m.libCursor > 0 {
@@ -222,24 +317,58 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.libCursor < m.libOffset {
 					m.libOffset = m.libCursor
 				}
-			} else if m.queueCursor > 0 {
+				m.selectDirAtCursor()
+			} else if m.active == "tracks" {
+				if m.tracksCursor > 0 {
+					m.tracksCursor--
+				}
+				if m.tracksCursor < m.tracksOffset {
+					m.tracksOffset = m.tracksCursor
+				}
+			} else if m.active == "queue" && m.queueCursor > 0 {
 				m.queueCursor--
 				if m.queueCursor < m.queueOffset {
 					m.queueOffset = m.queueCursor
 				}
 			}
 		case "down", "j":
-			vis := m.visibleRows()
+			mainHeight := m.height - 12
+			libHeight := mainHeight * 30 / 100
+			if libHeight < 3 {
+				libHeight = 3
+			}
+			libVis := libHeight - 2
+			if libVis < 0 {
+				libVis = 0
+			}
+			queueHeight := mainHeight - libHeight
+			queueVis := queueHeight - 2
+			if queueVis < 0 {
+				queueVis = 0
+			}
+			trackVis := m.visibleRows()
 			if m.active == "library" {
-				maxLen := len(m.browser.Entries)
+				maxLen := len(m.browserDirs())
 				if m.searchMode {
 					maxLen = len(m.searchIdx)
 				}
 				if m.libCursor < maxLen-1 {
 					m.libCursor++
 				}
-				if m.libCursor >= m.libOffset+vis {
-					m.libOffset = m.libCursor - vis + 1
+				if m.libCursor >= m.libOffset+libVis {
+					m.libOffset = m.libCursor - libVis + 1
+				}
+				m.selectDirAtCursor()
+			} else if m.active == "tracks" {
+				maxLen := m.dirTrackCount()
+				if m.searchMode {
+					maxLen = len(m.searchIdx)
+				}
+				if m.tracksCursor < maxLen-1 {
+					m.tracksCursor++
+				}
+				if m.tracksCursor >= m.tracksOffset+trackVis {
+					m.tracksOffset = m.tracksCursor - trackVis + 1
 				}
 			} else if m.active == "queue" {
 				maxLen := m.queue.Len()
@@ -249,29 +378,51 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.queueCursor < maxLen-1 {
 					m.queueCursor++
 				}
-				if m.queueCursor >= m.queueOffset+vis {
-					m.queueOffset = m.queueCursor - vis + 1
+				if m.queueCursor >= m.queueOffset+queueVis {
+					m.queueOffset = m.queueCursor - queueVis + 1
 				}
 			}
 		case "a":
-			if m.active == "library" && len(m.browser.Entries) > 0 {
+			if m.active == "library" {
+				dirs := m.browserDirs()
 				idx := m.libCursor
 				if m.searchMode && idx < len(m.searchIdx) {
 					idx = m.searchIdx[idx]
 				}
-				entry := m.browser.Entries[idx]
-				if entry.IsDir {
-					tracks, _ := m.queue.ScanDir(entry.Path)
+				if idx < len(dirs) {
+					sel := dirs[idx]
+					tracks, _ := m.queue.ScanDir(sel.Path)
 					for _, t := range tracks {
 						m.queue.Add(t)
 					}
-				} else {
-					m.queue.Add(types.Track{Path: entry.Path})
+				}
+			} else if m.active == "tracks" {
+				entries := m.trackFileEntries()
+				idx := m.tracksCursor
+				if m.searchMode && idx < len(m.searchIdx) {
+					idx = m.searchIdx[idx]
+				}
+				if idx < len(entries) {
+					e := entries[idx]
+					track := types.Track{
+						Path:     e.Path,
+						Title:    e.Title,
+						Artist:   e.Artist,
+						Album:    e.Album,
+						CoverArt: e.CoverArt,
+						Duration: e.Duration,
+						Source:   types.SourceLocal,
+					}
+					m.queue.Add(track)
 				}
 			}
 		case "A":
-			if m.active == "library" {
-				tracks, _ := m.queue.ScanDir(m.browser.CurrentPath)
+			if m.active == "library" || m.active == "tracks" {
+				dir := m.selectedDir
+				if dir == "" {
+					dir = m.browser.CurrentPath
+				}
+				tracks, _ := m.queue.ScanDir(dir)
 				for _, t := range tracks {
 					m.queue.Add(t)
 				}
@@ -291,30 +442,62 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "esc", "h":
-			if m.active == "library" && m.browser.CanGoBack() {
-				m.browser.GoBack()
-				m.libCursor = 0
-				m.libOffset = 0
+			if m.active == "library" {
+				m.selectedDir = ""
+				m.fileEntries = nil
+				m.tracksCursor = 0
+				m.tracksOffset = 0
+				if m.browser.CanGoBack() {
+					m.browser.GoBack()
+					m.libCursor = 0
+					m.libOffset = 0
+				}
+				if len(m.browserDirs()) > 0 {
+					m.selectDirAtCursor()
+				}
+			}
+		case "l":
+			if m.active == "library" {
+				dirs := m.browserDirs()
+				if m.libCursor < len(dirs) {
+					m.browser.Open(m.libIdxFromCursor())
+					m.libCursor = 0
+					m.libOffset = 0
+					m.selectedDir = ""
+					m.fileEntries = nil
+					m.tracksCursor = 0
+					m.tracksOffset = 0
+					m.searchMode = false
+					m.searchQuery = ""
+					if len(m.browserDirs()) > 0 {
+						m.selectDirAtCursor()
+					}
+				}
 			}
 		case "enter":
-			if m.active == "library" && len(m.browser.Entries) > 0 {
-				idx := m.libCursor
+			if m.active == "library" {
+				m.selectDirAtCursor()
+			} else if m.active == "tracks" {
+				entries := m.trackFileEntries()
+				idx := m.tracksCursor
 				if m.searchMode && idx < len(m.searchIdx) {
 					idx = m.searchIdx[idx]
 				}
-				entry := m.browser.Entries[idx]
-				if entry.IsDir {
-					m.browser.Open(idx)
-					m.libCursor = 0
-					m.libOffset = 0
-					m.searchMode = false
-					m.searchQuery = ""
-				} else {
+				if idx < len(entries) {
+					e := entries[idx]
 					m.playingID++
 					m.errMsg = ""
 					m.player.Stop()
 					m.queue.Clear()
-					track := types.Track{Path: entry.Path}
+					track := types.Track{
+						Path:     e.Path,
+						Title:    e.Title,
+						Artist:   e.Artist,
+						Album:    e.Album,
+						CoverArt: e.CoverArt,
+						Duration: e.Duration,
+						Source:   types.SourceLocal,
+					}
 					m.queue.Add(track)
 					m.queue.SetCurrent(0)
 					m.queueCursor = 0
@@ -412,6 +595,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.searchMode {
 				m.searchMode = true
 				m.searchQuery = ""
+				if m.active == "library" {
+					m.libOffset = 0
+				} else if m.active == "tracks" {
+					m.tracksOffset = 0
+				} else {
+					m.queueOffset = 0
+				}
 				return m, nil
 			}
 		case "<":
@@ -535,16 +725,27 @@ func (m *model) rebuildSearch() {
 		m.searchIdx = nil
 		return
 	}
-	var src []string // names from either browser enteries or queue strings
+	var src []string
 	if m.active == "library" {
-		for _, e := range m.browser.Entries {
+		for _, e := range m.browserDirs() {
 			src = append(src, e.Name)
+		}
+	} else if m.active == "tracks" {
+		for _, e := range m.trackFileEntries() {
+			name := e.Title
+			if name == "" {
+				name = e.Name
+			}
+			src = append(src, name)
 		}
 	} else {
 		for _, t := range m.queue.List() {
-			name := t.Path
-			if slash := strings.LastIndexByte(t.Path, '/'); slash >= 0 {
-				name = t.Path[slash+1:]
+			name := t.Title
+			if name == "" {
+				name = t.Path
+				if slash := strings.LastIndexByte(t.Path, '/'); slash >= 0 {
+					name = t.Path[slash+1:]
+				}
 			}
 			src = append(src, name)
 		}
@@ -561,12 +762,57 @@ func (m *model) rebuildSearch() {
 		return
 	}
 
-	// clamping of cursor
-	if m.active == "library" && m.libCursor >= len(m.searchIdx) {
-		m.libCursor = len(m.searchIdx) - 1
+	mainH := m.height - 12
+	libH := mainH * 30 / 100
+	if libH < 3 {
+		libH = 3
 	}
-	if m.active == "queue" && m.queueCursor >= len(m.searchIdx) {
-		m.queueCursor = len(m.searchIdx) - 1
+	libVis := libH - 2
+	if libVis < 0 {
+		libVis = 0
+	}
+	queueH := mainH - libH
+	queueVis := queueH - 2
+	if queueVis < 0 {
+		queueVis = 0
+	}
+	trackVis := m.height - 14
+	if trackVis < 0 {
+		trackVis = 0
+	}
+
+	if m.active == "library" {
+		if m.libCursor >= len(m.searchIdx) {
+			m.libCursor = len(m.searchIdx) - 1
+		}
+		if m.libOffset > m.libCursor {
+			m.libOffset = m.libCursor
+		}
+		if libVis > 0 && m.libCursor >= m.libOffset+libVis {
+			m.libOffset = m.libCursor - libVis + 1
+		}
+	}
+	if m.active == "tracks" {
+		if m.tracksCursor >= len(m.searchIdx) {
+			m.tracksCursor = len(m.searchIdx) - 1
+		}
+		if m.tracksOffset > m.tracksCursor {
+			m.tracksOffset = m.tracksCursor
+		}
+		if trackVis > 0 && m.tracksCursor >= m.tracksOffset+trackVis {
+			m.tracksOffset = m.tracksCursor - trackVis + 1
+		}
+	}
+	if m.active == "queue" {
+		if m.queueCursor >= len(m.searchIdx) {
+			m.queueCursor = len(m.searchIdx) - 1
+		}
+		if m.queueOffset > m.queueCursor {
+			m.queueOffset = m.queueCursor
+		}
+		if queueVis > 0 && m.queueCursor >= m.queueOffset+queueVis {
+			m.queueOffset = m.queueCursor - queueVis + 1
+		}
 	}
 }
 
@@ -643,11 +889,11 @@ func (m model) View() tea.View {
 			wStr = badStyle.Render(fmt.Sprintf("%d", m.width))
 		}
 		hStr := fmt.Sprintf("%d", m.height)
-		if m.height < 24 {
+		if m.height < 28 {
 			hStr = badStyle.Render(fmt.Sprintf("%d", m.height))
 		}
 
-		s := fmt.Sprintf("Terminal size too small\nWidth = %s  Height = %s\n\nNeeded for current config\nWidth >= 84, Height >= 24", wStr, hStr)
+		s := fmt.Sprintf("Terminal size too small\nWidth = %s  Height = %s\n\nNeeded for current config\nWidth >= 84, Height >= 28", wStr, hStr)
 		placed := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, s)
 		return tea.View{
 			AltScreen: true,
@@ -656,52 +902,57 @@ func (m model) View() tea.View {
 	}
 
 	topHeight := 1
-	playbackHeight := 5
-	mainHeight := m.height - topHeight - playbackHeight
+	footerHeight := 11
+	mainHeight := m.height - topHeight - footerHeight
 
-	// gap := 1
-	sideWidth := m.width / 4
-	visWidth := m.width / 2
-	queueWidth := m.width - sideWidth - visWidth
+	leftWidth := m.width * 35 / 100
+	rightWidth := m.width - leftWidth
 
-	vis := m.visibleRows()
-	entries := m.browser.Entries
-	if m.searchMode && m.active == "library" && len(m.searchIdx) < len(entries) {
+	libHeight := mainHeight * 30 / 100
+	if libHeight < 3 {
+		libHeight = 3
+	}
+	queueHeight := mainHeight - libHeight
+
+	// filter dir only entries for library
+	dirs := m.browserDirs()
+	if m.active == "library" && m.searchMode && len(m.searchIdx) > 0 {
 		filtered := make([]types.Entry, len(m.searchIdx))
 		for i, idx := range m.searchIdx {
-			filtered[i] = entries[idx]
+			filtered[i] = dirs[idx]
 		}
-		entries = filtered
+		dirs = filtered
 	}
-	libSlice := entries
-	libOffset := 0
-	if len(entries) > vis {
+	dirSlice := dirs
+	dirOffset := 0
+	if len(dirs) > libHeight-2 {
 		off := m.libOffset
-		if off > len(entries)-vis {
-			off = len(entries) - vis
+		if off > len(dirs)-libHeight+2 {
+			off = len(dirs) - libHeight + 2
 		}
 		if off < 0 {
 			off = 0
 		}
-		libSlice = entries[off : off+vis]
-		libOffset = off
+		dirSlice = dirs[off : off+libHeight-2]
+		dirOffset = off
 	}
 	m.libraryPanel.SetData(components.LibData{
-		Entries:     libSlice,
-		Title:       m.browser.CurrentName(),
-		Cursor:      m.libCursor,
-		Offset:      libOffset,
-		Total:       len(m.browser.Entries),
-		Active:      m.active == "library",
-		Width:       sideWidth,
-		Height:      mainHeight,
-		SearchMode:  m.searchMode && m.active == "library",
-		SearchQuery: m.searchQuery,
+		Entries:      dirSlice,
+		Title:        m.browser.CurrentName(),
+		Cursor:       m.libCursor,
+		Offset:       dirOffset,
+		Total:        len(dirs),
+		Active:       m.active == "library",
+		Width:        leftWidth,
+		Height:       libHeight,
+		SelectedPath: m.selectedDir,
+		SearchMode:   m.searchMode && m.active == "library",
+		SearchQuery:  m.searchQuery,
 	})
 
-	// queue
+	// queue panel (below library)
 	tracks := m.queue.List()
-	if m.searchMode && m.active == "queue" && len(m.searchIdx) < len(tracks) {
+	if m.active == "queue" && m.searchMode && len(m.searchIdx) > 0 {
 		filtered := make([]types.Track, len(m.searchIdx))
 		for i, idx := range m.searchIdx {
 			filtered[i] = tracks[idx]
@@ -710,36 +961,94 @@ func (m model) View() tea.View {
 	}
 	queueSlice := tracks
 	queueOffset := 0
-	if len(tracks) > vis {
+	queueVis := queueHeight - 2
+	if queueVis < 0 {
+		queueVis = 0
+	}
+	if len(tracks) > queueVis {
 		off := m.queueOffset
-		if off > len(tracks)-vis {
-			off = len(tracks) - vis
+		if off > len(tracks)-queueVis {
+			off = len(tracks) - queueVis
 		}
 		if off < 0 {
 			off = 0
 		}
-		queueSlice = tracks[off : off+vis]
+		queueSlice = tracks[off : off+queueVis]
 		queueOffset = off
+	}
+	// PlayingIdx relative to filtered list
+	playIdx := m.queue.CurrentIndex()
+	if m.active == "queue" && m.searchMode && len(m.searchIdx) > 0 {
+		playIdx = -1
+		for i, idx := range m.searchIdx {
+			if idx == m.queue.CurrentIndex() {
+				playIdx = i
+				break
+			}
+		}
 	}
 	m.queuePanel.SetData(components.QueueData{
 		Tracks:      queueSlice,
-		PlayingIdx:  m.queue.CurrentIndex(),
+		PlayingIdx:  playIdx,
 		Playing:     m.player.State() != playback.Stopped,
 		Cursor:      m.queueCursor,
 		Offset:      queueOffset,
-		Total:       m.queue.Len(),
+		Total:       len(tracks),
 		Active:      m.active == "queue",
-		Width:       queueWidth,
-		Height:      mainHeight,
+		Width:       leftWidth,
+		Height:      queueHeight,
 		SearchMode:  m.searchMode && m.active == "queue",
 		SearchQuery: m.searchQuery,
 	})
 
-	track := m.player.CurrentTrack()
-	trackName := ""
-	if track.Path != "" {
-		if idx := strings.LastIndexByte(track.Path, '/'); idx >= 0 {
-			trackName = track.Path[idx+1:]
+	// tracks panel (right side)
+	fileEntries := m.fileEntries
+	if fileEntries == nil {
+		fileEntries = m.trackFileEntries()
+	}
+	if m.active == "tracks" && m.searchMode && len(m.searchIdx) > 0 {
+		filtered := make([]types.Entry, len(m.searchIdx))
+		for i, idx := range m.searchIdx {
+			filtered[i] = fileEntries[idx]
+		}
+		fileEntries = filtered
+	}
+	fileSlice := fileEntries
+	fileOffset := 0
+	trackVis := mainHeight - 2
+	if trackVis < 0 {
+		trackVis = 0
+	}
+	if len(fileEntries) > trackVis {
+		off := m.tracksOffset
+		if off > len(fileEntries)-trackVis {
+			off = len(fileEntries) - trackVis
+		}
+		if off < 0 {
+			off = 0
+		}
+		fileSlice = fileEntries[off : off+trackVis]
+		fileOffset = off
+	}
+	playingTrack := m.player.CurrentTrack()
+	m.tracksPanel.SetData(components.TracksData{
+		Entries:     fileSlice,
+		PlayingPath: playingTrack.Path,
+		Cursor:      m.tracksCursor,
+		Offset:      fileOffset,
+		Total:       len(fileEntries),
+		Active:      m.active == "tracks",
+		Height:      mainHeight,
+		Width:       rightWidth,
+		SearchMode:  m.searchMode && m.active == "tracks",
+		SearchQuery: m.searchQuery,
+	})
+
+	trackName := playingTrack.Title
+	if trackName == "" {
+		trackName = playingTrack.Path
+		if idx := strings.LastIndexByte(playingTrack.Path, '/'); idx >= 0 {
+			trackName = playingTrack.Path[idx+1:]
 		}
 	}
 	var stateIcon string
@@ -752,17 +1061,6 @@ func (m model) View() tea.View {
 		stateIcon = common.MusicNote
 	}
 
-	m.visual.SetData(components.VisualData{
-		TrackName: trackName,
-		StateIcon: stateIcon,
-		Position:  m.player.Position(),
-		Duration:  m.player.Duration(),
-		VolLevel:  m.player.Volume(),
-		Muted:     m.player.IsMuted(),
-		Height:    mainHeight,
-		Width:     visWidth,
-	})
-
 	m.footer.SetData(components.FooterData{
 		TrackName: trackName,
 		StateIcon: stateIcon,
@@ -770,21 +1068,22 @@ func (m model) View() tea.View {
 		Duration:  m.player.Duration(),
 		VolLevel:  m.player.Volume(),
 		Muted:     m.player.IsMuted(),
-		Height:    playbackHeight,
+		Height:    footerHeight,
 		Width:     m.width,
+		CoverArt:  playingTrack.CoverArt,
 	})
 
 	m.top.SetTrackCount(m.browser.TrackCount())
 
+	leftCol := lipgloss.JoinVertical(lipgloss.Left,
+		m.libraryPanel.View(),
+		m.queuePanel.View(),
+	)
+
 	s := lipgloss.JoinVertical(
 		lipgloss.Left,
 		m.top.View(topHeight, m.width),
-		lipgloss.JoinHorizontal(
-			lipgloss.Top,
-			m.libraryPanel.View(),
-			m.visual.View(),
-			m.queuePanel.View(),
-		),
+		lipgloss.JoinHorizontal(lipgloss.Top, leftCol, m.tracksPanel.View()),
 		m.footer.View(),
 		lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6C7086")).
@@ -816,9 +1115,9 @@ func (m model) helpView() string {
 	}{
 		{"Navigation", [][2]string{
 			{"↑ / k , ↓ / j", "Move cursor"},
-			{"Tab  ←  →", "Switch panel"},
-			{"Enter (dir)", "Open directory"},
-			{"Enter (track)", "Play track"},
+			{"Tab", "Switch panel"},
+			{"Enter", "Open directory / Play track"},
+			{"l", "Navigate into directory (alt)"},
 			{"Backspace / h", "Parent directory"},
 		}},
 		{"Search", [][2]string{
@@ -826,10 +1125,10 @@ func (m model) helpView() string {
 			{"Esc", "Exit search"},
 			{"Backspace", "Delete character"},
 		}},
-		{"Queue", [][2]string{
-			{"a (track)", "Add to queue"},
+		{"Add to Queue", [][2]string{
+			{"a (track/song)", "Add single to queue"},
 			{"a (dir)", "Add all from dir"},
-			{"A", "Add all current dir"},
+			{"A", "Add all from selected dir"},
 			{"d", "Remove from queue"},
 		}},
 		{"Playback", [][2]string{

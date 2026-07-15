@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/yadneshx17/resonance/internal/common"
 	"github.com/yadneshx17/resonance/internal/types"
 )
 
@@ -71,14 +72,24 @@ func (b *Browser) ReadDir() error {
 				IsDir: true,
 			})
 		} else if strings.HasSuffix(strings.ToLower(name), ".mp3") {
+			m, err := common.ReadMetadata(fullPath)
+			if err != nil {
+				return nil
+			}
 			entries = append(entries, Entry{
-				Name:  name,
-				Path:  fullPath,
-				IsDir: false,
+				Name:     name,
+				Path:     fullPath,
+				IsDir:    false,
+				Title:    m.Title,
+				Artist:   m.Artist,
+				Album:    m.Album,
+				Duration: m.Duration,
+				CoverArt: m.CoverArt,
 			})
 		}
 	}
 
+	// directories at top
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].IsDir != entries[j].IsDir {
 			return entries[i].IsDir

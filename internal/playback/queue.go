@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gopxl/beep/mp3"
+	"github.com/yadneshx17/resonance/internal/common"
 	"github.com/yadneshx17/resonance/internal/types"
 )
 
@@ -103,18 +103,19 @@ func (q *Queue) ScanDir(root string) ([]types.Track, error) {
 		if !strings.HasSuffix(strings.ToLower(info.Name()), ".mp3") {
 			return nil
 		}
-		f, err := os.Open(path)
+		meta, err := common.ReadMetadata(path)
 		if err != nil {
 			return nil
 		}
-		_, _, err = mp3.Decode(f)
-		if err != nil {
-			f.Close()
-			return nil
-		}
-		// defer in loops leaks file handles
-		f.Close()
-		tracks = append(tracks, types.Track{Path: path})
+		tracks = append(tracks, types.Track{
+			Path:     path,
+			Title:    meta.Title,
+			Artist:   meta.Artist,
+			Album:    meta.Album,
+			CoverArt: meta.CoverArt,
+			Duration: meta.Duration,
+			Source:   types.SourceLocal,
+		})
 		return nil
 	})
 	return tracks, err

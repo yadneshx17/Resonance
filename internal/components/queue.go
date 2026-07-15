@@ -68,25 +68,46 @@ func (q Queue) buildQueueBlock() string {
 		style := lipgloss.NewStyle().Width(contentWidth).Align(lipgloss.Center)
 		return style.Render("Nothing in Queue")
 	}
-	nameMax := contentWidth - 2
+	durWidth := 6
+	seqWidth := 3
+	prefixWidth := 3
+	nameMax := contentWidth - seqWidth - 1 - prefixWidth - 1 - durWidth
 	if nameMax < 1 {
 		nameMax = 1
 	}
 	for i, t := range q.tracks {
 		idx := q.offset + i
-		name := t.Path
-		if slash := strings.LastIndexByte(t.Path, '/'); slash >= 0 {
-			name = t.Path[slash+1:]
+		name := t.Title
+		if name == "" {
+			name = t.Path
+			if slash := strings.LastIndexByte(t.Path, '/'); slash >= 0 {
+				name = t.Path[slash+1:]
+			}
+		} else if t.Artist != "" {
+			name += " - " + t.Artist
 		}
 		runes := []rune(name)
 		if len(runes) > nameMax {
 			name = string(runes[:nameMax-1]) + "…"
 		}
-		line := fmt.Sprintf("  %s", name)
+		seq := fmt.Sprintf("%*d", seqWidth-1, idx+1)
+		dur := ""
+		if t.Duration > 0 {
+			dur = common.FmtDuration(t.Duration)
+		}
+		durFmt := fmt.Sprintf("%*s", durWidth, dur)
+		prefix := "   "
 		if idx == q.playingIdx && q.playing {
-			line = common.PlayingTrackStyle.Render(fmt.Sprintf("%s %s", common.Play, name))
+			prefix = common.Play + "  "
 		} else if q.active && q.cursor == idx {
-			line = common.CursorStyle.Render(common.Cursor + "" + name)
+			prefix = common.Cursor + " "
+		}
+		padded := fmt.Sprintf("%-*s", nameMax, name)
+		line := fmt.Sprintf("%s %s%s %s", seq, prefix, padded, durFmt)
+		if idx == q.playingIdx && q.playing {
+			line = common.PlayingTrackStyle.Render(line)
+		} else if q.active && q.cursor == idx {
+			line = common.CursorStyle.Render(line)
 		}
 		lines = append(lines, line)
 	}
