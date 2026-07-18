@@ -85,7 +85,7 @@ func (t Tracks) buildBlock() string {
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#6C7086"))
 	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#45475A"))
 
-	header := fmt.Sprintf("%-*s %-*s%-*s %-*s %-*s %*s",
+	header := fmt.Sprintf("%*s %-*s%-*s %-*s %-*s %*s",
 		seqWidth, "#",
 		prefixWidth, "",
 		titleWidth, "Title",
