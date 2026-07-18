@@ -885,7 +885,7 @@ func (m model) View() tea.View {
 		badStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#d46159")).Bold(true)
 
 		wStr := fmt.Sprintf("%d", m.width)
-		if m.width < 60 {
+		if m.width < 84 {
 			wStr = badStyle.Render(fmt.Sprintf("%d", m.width))
 		}
 		hStr := fmt.Sprintf("%d", m.height)
