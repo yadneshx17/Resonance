@@ -66,10 +66,10 @@ func (f Footer) buildFooterBlock() string {
 	if innerLines < 1 {
 		innerLines = 1
 	}
-	coverW := 16
+	coverW := 32
 	coverH := innerLines
 	if coverH > 8 {
-		coverH = 8
+		coverH = 32
 	}
 	coverLines := make([]string, coverH)
 	if len(f.coverArt) > 0 {

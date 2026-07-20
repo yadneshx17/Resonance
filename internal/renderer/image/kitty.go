@@ -12,6 +12,9 @@ import (
 	"golang.org/x/image/draw"
 )
 
+// TODO
+// TODO: Implement Kitty graphics protocol support for pixel-perfect cover art rendering.
+
 const (
 	CHUNK_SIZE = 4096
 	DELIM      = "\10010EEEE"
@@ -317,9 +320,8 @@ var Grid = []rune{
 	0x1D244,
 }
 
-func RenderCover() {
-
-}
+// Orchestrate
+// func RenderCover() {}
 
 func decodeCover(data []byte) (image.Image, error) {
 	img, _, err := image.Decode(bytes.NewReader(data))

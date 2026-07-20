@@ -25,8 +25,8 @@ var (
 	cursorStyle       = common.CursorStyle
 )
 
-// const bgColor = "\x1b[48;2;26;27;56m" // background sequence
 const bgColor = "\x1b[48;2;30;30;46m"
+// const bgColor = "\x1b[0;49m" // transparent
 
 const (
 	setupWelcome = iota
