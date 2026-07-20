@@ -1051,6 +1051,20 @@ func (m model) View() tea.View {
 			trackName = playingTrack.Path[idx+1:]
 		}
 	}
+
+	title := playingTrack.Title
+	if title == "" {
+		title = "Unknown Title"
+	}
+	album := playingTrack.Album
+	if album == "" {
+		album = "Unknown Album"
+	}
+	artist := playingTrack.Artist
+	if artist == "" {
+		artist = "Unknown Artist"
+	}
+
 	var stateIcon string
 	switch m.player.State() {
 	case playback.Playing:
@@ -1063,6 +1077,9 @@ func (m model) View() tea.View {
 
 	m.footer.SetData(components.FooterData{
 		TrackName: trackName,
+		Title:     title,
+		Album:     album,
+		Artist:    artist,
 		StateIcon: stateIcon,
 		Position:  m.player.Position(),
 		Duration:  m.player.Duration(),

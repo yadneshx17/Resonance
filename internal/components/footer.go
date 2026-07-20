@@ -11,6 +11,9 @@ import (
 
 type FooterData struct {
 	TrackName string
+	Title     string
+	Album     string
+	Artist    string
 	StateIcon string
 	Position  time.Duration
 	Duration  time.Duration
@@ -23,6 +26,9 @@ type FooterData struct {
 
 type Footer struct {
 	trackName string
+	title     string
+	album     string
+	artist    string
 	stateIcon string
 	position  time.Duration
 	duration  time.Duration
@@ -38,6 +44,9 @@ var footerStyle = lipgloss.NewStyle().
 
 func (f *Footer) SetData(data FooterData) {
 	f.trackName = data.TrackName
+	f.title = data.Title
+	f.album = data.Album
+	f.artist = data.Artist
 	f.stateIcon = data.StateIcon
 	f.position = data.Position
 	f.duration = data.Duration
@@ -53,6 +62,8 @@ func (f *Footer) View() string {
 	return footerStyle.
 		Width(f.width).
 		Height(f.height).
+		Bold(true).
+		Italic(true).
 		Render(content)
 }
 
@@ -66,10 +77,12 @@ func (f Footer) buildFooterBlock() string {
 	if innerLines < 1 {
 		innerLines = 1
 	}
+
+	// Cover art
 	coverW := 32
 	coverH := innerLines
-	if coverH > 8 {
-		coverH = 32
+	if coverH > 9 {
+		coverH = 9
 	}
 	coverLines := make([]string, coverH)
 	if len(f.coverArt) > 0 {
@@ -81,77 +94,131 @@ func (f Footer) buildFooterBlock() string {
 			}
 		}
 	}
-	textWidth := contentWidth - coverW - 2
+
+	// Text area — "  │  " separator = 5 chars
+	textWidth := contentWidth - coverW - 5
 	if textWidth < 10 {
 		textWidth = contentWidth
 		coverW = 0
 	}
 
-	info := f.stateIcon + " " + f.trackName
-	runes := []rune(info)
-	if len(runes) > textWidth {
-		info = string(runes[:textWidth-1]) + "…"
-	}
-	info = fmt.Sprintf("%-*s", textWidth, info)
-
-	timeStr := ""
-	if f.duration > 0 {
-		timeStr = fmt.Sprintf("%s / %s", common.FmtDuration(f.position), common.FmtDuration(f.duration))
-	}
-	barWidth := (textWidth - len(timeStr) - 1) / 2
-	if barWidth < 0 {
-		barWidth = 0
-	}
-	bar := common.ProgressBar(f.position, f.duration, barWidth)
+	// Styles
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086"))
+	dimBold := lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086")).Bold(true)
+	bold := lipgloss.NewStyle().Bold(true)
+	italic := lipgloss.NewStyle().Italic(true)
 	barStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#89DCEB"))
-	bar = barStyle.Render(bar)
-	progressLine := bar
-	if timeStr != "" {
-		if bar != "" {
-			progressLine += " "
-		}
-		progressLine += timeStr
-	}
-	progressLine = fmt.Sprintf("%-*s", textWidth, progressLine)
+	mutedStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F38BA8"))
+	sepStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#45475A"))
 
+	// Volume
 	volPct := int((f.volLevel + 3) / 6 * 100)
-	if volPct < 0 {
-		volPct = 0
-	} else if volPct > 100 {
-		volPct = 100
-	}
-	volStr := ""
-	if f.muted {
-		mutedStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F38BA8"))
-		volStr = mutedStyle.Render("[MUTED]")
-	} else {
-		volIcon := common.VolumeLow
-		if volPct > 33 {
-			volIcon = common.VolumeMedium + " "
-		}
-		if volPct > 66 {
-			volIcon = common.VolumeHigh + " "
-		}
-		volStr = fmt.Sprintf("%svol: %d%%", volIcon, volPct)
-	}
-	volStr = fmt.Sprintf("%-*s", textWidth, volStr)
+	volPct = max(0, min(100, volPct))
 
-	textRows := []string{info, progressLine, volStr}
+	// ── Alignment anchors ──
+	// Progress bar starts where title starts, ends where artist/album end.
+	// Artist and album share a right edge with 4-col padding from border.
+	rightPad := 4
+
+	// Row 1: Time + Title + Artist
+	timeText := fmt.Sprintf("+ Time %s/%s", common.FmtDuration(f.position), common.FmtDuration(f.duration))
+	titleText := f.title
+	artistText := "by " + f.artist
+
+	timeW := len([]rune(timeText))
+	artistW := len([]rune(artistText))
+
+	gap1 := 4
+	barStart := timeW + gap1
+	barEnd := textWidth - rightPad
+	barWidth := barEnd - barStart
+	if barWidth < 4 {
+		barWidth = 4
+		barEnd = barStart + barWidth
+	}
+
+	titleMax := barWidth - artistW - 1
+	if titleMax < 1 {
+		titleMax = 1
+	}
+	if len([]rune(titleText)) > titleMax {
+		titleText = string([]rune(titleText)[:titleMax-1]) + "…"
+	}
+	titleW := len([]rune(titleText))
+
+	gap2 := barWidth - titleW - artistW
+	if gap2 < 1 {
+		gap2 = 1
+	}
+
+	row1 := dimBold.Render(timeText) +
+		strings.Repeat(" ", gap1) +
+		bold.Render(titleText) +
+		strings.Repeat(" ", gap2) +
+		dim.Bold(true).Italic(true).Render(artistText)
+
+	// Row 2: Volume (left) + Album (right-aligned to barEnd)
+	var volText string
+	if f.muted {
+		volText = "- Vol [MUTED]"
+	} else {
+		volText = fmt.Sprintf("- Vol %d%%", volPct)
+	}
+
+	volW := len([]rune(volText))
+
+	albumText := f.album
+	albumAvail := barEnd - volW - 1
+	if albumAvail < 1 {
+		albumAvail = 1
+	}
+	if len([]rune(albumText)) > albumAvail {
+		albumText = string([]rune(albumText)[:albumAvail-1]) + "…"
+	}
+	albumW := len([]rune(albumText))
+
+	gap3 := barEnd - volW - albumW
+	if gap3 < 1 {
+		gap3 = 1
+	}
+
+	var volStyled string
+	if f.muted {
+		volStyled = mutedStyle.Render(volText)
+	} else {
+		volStyled = dim.Render(volText)
+	}
+
+	row2 := volStyled +
+		strings.Repeat(" ", gap3) +
+		italic.Render(albumText)
+
+	// Row 3: Progress bar — same span as title..artist/album
+	bar := common.ProgressBar(f.position, f.duration, barWidth)
+	row3 := strings.Repeat(" ", barStart) + barStyle.Render(bar)
+
+	// Assemble text rows
+	textRows := []string{row1, row2, row3}
 	for len(textRows) < innerLines {
 		textRows = append(textRows, "")
 	}
 
+	// Combine cover art and text
 	lines := make([]string, innerLines)
+	sep := sepStyle.Render("│")
 	for i := 0; i < innerLines; i++ {
 		text := ""
 		if i < len(textRows) {
 			text = textRows[i]
 		}
-		sep := "\x1b[38;2;69;71;90m│\x1b[39m  "
-		if coverW > 0 && i < len(coverLines) && coverLines[i] != "" {
-			lines[i] = coverLines[i] + "  " + sep + text
-		} else if coverW > 0 && i < len(coverLines) {
-			lines[i] = strings.Repeat(" ", coverW) + "  " + sep + text
+		if coverW > 0 && i < coverH {
+			if coverLines[i] != "" {
+				lines[i] = coverLines[i] + "  " + sep + "  " + text
+			} else {
+				lines[i] = strings.Repeat(" ", coverW) + "  " + sep + "  " + text
+			}
+		} else if coverW > 0 {
+			lines[i] = strings.Repeat(" ", coverW) + "  " + sep + "  " + text
 		} else {
 			lines[i] = text
 		}

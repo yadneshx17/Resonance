@@ -34,7 +34,8 @@ var (
 	Cast         = "\U000f0122" // Printable Rune : "󰄢"
 
 	// Audio Library
-	MusicNote  = "\uf001"     // Printable Rune : ""
+	MusicNote  = "\uf001" // Printable Rune : ""
+	MusicNote2 = "♪"
 	MusicNotes = "\uf886"     // Printable Rune : ""
 	Album      = "\U000f1362" // Printable Rune : "󱍢"
 	Disc       = "\uf10c"     // Printable Rune : ""
@@ -71,7 +72,3 @@ var (
 	Confirm = "↵" // Printable Rune : "↵"
 	Cancel  = "⎋" // Printable Rune : "⎋"
 )
-
-var Icons = map[string]Style{
-	"audio": {Icon: "\uf001", Color: "#ee524f"}, // Printable Rune : ""
-}
