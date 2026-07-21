@@ -193,9 +193,16 @@ func (f Footer) buildFooterBlock() string {
 		strings.Repeat(" ", gap3) +
 		italic.Render(albumText)
 
-	// Row 3: Progress bar — same span as title..artist/album
-	bar := common.ProgressBar(f.position, f.duration, barWidth)
-	row3 := strings.Repeat(" ", barStart) + barStyle.Render(bar)
+	// Row 3: Controls (below Vol) + Progress bar
+	controlsStyled := "  " + dim.Render(common.PrevTrack) + "  " + f.stateIcon + "  " + dim.Render(common.NextTrack)
+	controlsW := 9
+	pbarStart := barStart
+	pbarWidth := barEnd - pbarStart
+	if pbarWidth < 1 {
+		pbarWidth = 1
+	}
+	bar := common.ProgressBar(f.position, f.duration, pbarWidth)
+	row3 := controlsStyled + strings.Repeat(" ", pbarStart-controlsW) + barStyle.Render(bar)
 
 	// Assemble text rows
 	textRows := []string{row1, row2, row3}

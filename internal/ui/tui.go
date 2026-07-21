@@ -26,6 +26,7 @@ var (
 )
 
 const bgColor = "\x1b[48;2;30;30;46m"
+
 // const bgColor = "\x1b[0;49m" // transparent
 
 const (
@@ -1072,7 +1073,7 @@ func (m model) View() tea.View {
 	case playback.Paused:
 		stateIcon = pausedIconStyle.Render(common.Pause)
 	default:
-		stateIcon = common.MusicNote
+		stateIcon = common.MusicNote2
 	}
 
 	m.footer.SetData(components.FooterData{
