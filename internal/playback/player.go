@@ -8,9 +8,9 @@ import (
 
 	"github.com/gopxl/beep"
 	"github.com/gopxl/beep/effects"
-	"github.com/yadneshx17/resonance/internal/types"
 	"github.com/gopxl/beep/mp3"
 	"github.com/gopxl/beep/speaker"
+	"github.com/yadneshx17/resonance/internal/types"
 )
 
 // Stores the loaded audio and current state
@@ -133,7 +133,7 @@ func (p *Player) Play() error {
 	speaker.Init(p.format.SampleRate, p.format.SampleRate.N(time.Second/10))
 
 	// allows for pausing a Streamer.
-	p.ctrl = &beep.Ctrl{Streamer: p.streamer, Paused: false} 
+	p.ctrl = &beep.Ctrl{Streamer: p.streamer, Paused: false}
 
 	// Volume adjusts the volume of the wrapped Streamer in a human-natural way
 	p.volume = &effects.Volume{Streamer: p.ctrl, Base: 2, Volume: p.volLevel, Silent: p.muted}
