@@ -7,7 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/charmbracelet/x/term"
 )
 
 type Credentials struct {
@@ -72,6 +75,17 @@ func LoadCredentials() (*Credentials, error) {
 	return &c, nil
 }
 
+func readSecret(prompt string) (string, error) {
+	fmt.Print(prompt)
+	fd := int(syscall.Stdin)
+	password, err := term.ReadPassword(uintptr(fd))
+	fmt.Println() // newline after hidden input
+	if err != nil {
+		return "", fmt.Errorf("failed to read secret: %w", err)
+	}
+	return strings.TrimSpace(string(password)), nil
+}
+
 func PromptCredentials() (*Credentials, error) {
 	reader := bufio.NewReader(os.Stdin)
 
@@ -79,14 +93,14 @@ func PromptCredentials() (*Credentials, error) {
 	clientID, err := reader.ReadString('\n')
 	if err != nil {
 		return nil, fmt.Errorf("failed to read client ID: %w", err)
-	}	
+	}
 	clientID = strings.TrimSpace(clientID)
 	if clientID == "" {
 		return nil, fmt.Errorf("client ID cannot be empty")
 	}
 
-	fmt.Print("Enter Spotify Client Secret: ")
-	clientSecret, err := reader.ReadString('\n')
+	// fmt.Print("Enter Spotify Client Secret: ")
+	clientSecret, err := readSecret("Enter Spotify Client Secret (Hidden input): ") // hidden
 	if err != nil {
 		return nil, fmt.Errorf("failed to read client secret: %w", err)
 	}
