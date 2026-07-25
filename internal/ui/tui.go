@@ -831,7 +831,7 @@ func tick() tea.Cmd {
 }
 
 func (m model) setupView() tea.View {
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#B4BEFE"))
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#000000"))
 	normalStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#CDD6F4"))
 	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086"))
 	errorStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F38BA8"))
@@ -849,7 +849,7 @@ func (m model) setupView() tea.View {
 		Width(50)
 
 	var s string
-	s += titleStyle.Render("Welcome to Resonance") + "\n\n"
+	s += titleStyle.Render("\x1b[48;2;180;190;254m Welcome to Resonance ") + "\n\n"
 	s += normalStyle.Render("No music library configured.") + "\n\n"
 
 	if m.errMsg != "" {
@@ -867,7 +867,7 @@ func (m model) setupView() tea.View {
 		s += normalStyle.Render("Enter music directory path:") + "\n\n"
 		inputLine := "> " + m.setupInput + "█"
 		s += inputStyle.Render(inputLine) + "\n\n"
-		s += keyStyle.Render("  " + common.Confirm + " confirm    " + common.Cancel + " cancel")
+		s += keyStyle.Render("  " + common.Confirm + " confirm    " + "<esc>" + " cancel")
 	}
 
 	box := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, s)
