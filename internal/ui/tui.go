@@ -52,6 +52,7 @@ type model struct {
 	tooSmall     bool
 	selectedDir  string
 	fileEntries  []types.Entry
+	subdirCount  int
 
 	// Setup
 	setup      bool
@@ -149,6 +150,16 @@ func (m model) fillBg(content string) string {
 
 func (m model) browserDirs() []types.Entry {
 	var dirs []types.Entry
+
+	// Add dot entry if current folder has songs
+	if m.browser.HasDirectSongs() {
+		dirs = append(dirs, types.Entry{
+			Name:  "•",
+			Path:  m.browser.CurrentPath,
+			IsDir: false,
+		})
+	}
+
 	for _, e := range m.browser.Entries {
 		if e.IsDir {
 			dirs = append(dirs, e)
@@ -199,10 +210,13 @@ func loadDirFiles(dir string) []types.Entry {
 	return entries
 }
 
-func (m model) libIdxFromCursor() int {
+func (m model) libIdxFromCursor(dirsIdx int) int {
 	dirs := m.browserDirs()
-	if m.libCursor < len(dirs) {
-		entry := dirs[m.libCursor]
+	if dirsIdx >= 0 && dirsIdx < len(dirs) {
+		entry := dirs[dirsIdx]
+		if entry.Name == "•" {
+			return -1 // sentinel for dot entry
+		}
 		for i, e := range m.browser.Entries {
 			if e.Path == entry.Path {
 				return i
@@ -218,10 +232,26 @@ func (m *model) selectDirAtCursor() {
 	if m.searchMode && m.active == "library" && m.libCursor < len(m.searchIdx) {
 		idx = m.searchIdx[m.libCursor]
 	}
+	m.subdirCount = 0
 	if idx < len(dirs) {
 		sel := dirs[idx]
-		m.selectedDir = sel.Path
-		m.fileEntries = loadDirFiles(sel.Path)
+		if sel.Name == "•" {
+			m.selectedDir = m.browser.CurrentPath
+			m.fileEntries = m.browser.DirectSongs()
+		} else {
+			m.selectedDir = sel.Path
+			m.fileEntries = loadDirFiles(sel.Path)
+			if len(m.fileEntries) == 0 {
+				items, err := os.ReadDir(sel.Path)
+				if err == nil {
+					for _, item := range items {
+						if item.IsDir() && !strings.HasPrefix(item.Name(), ".") {
+							m.subdirCount++
+						}
+					}
+				}
+			}
+		}
 		m.tracksCursor = 0
 		m.tracksOffset = 0
 	}
@@ -392,9 +422,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if idx < len(dirs) {
 					sel := dirs[idx]
-					tracks, _ := m.queue.ScanDir(sel.Path)
-					for _, t := range tracks {
-						m.queue.Add(t)
+					if sel.Name == "•" {
+						for _, e := range m.browser.DirectSongs() {
+							m.queue.Add(types.Track{
+								Path:     e.Path,
+								Title:    e.Title,
+								Artist:   e.Artist,
+								Album:    e.Album,
+								CoverArt: e.CoverArt,
+								Duration: e.Duration,
+								Source:   types.SourceLocal,
+							})
+						}
+					} else {
+						tracks, _ := m.queue.ScanDir(sel.Path)
+						for _, t := range tracks {
+							m.queue.Add(t)
+						}
 					}
 				}
 			} else if m.active == "tracks" {
@@ -457,27 +501,49 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.selectDirAtCursor()
 				}
 			}
-		case "l":
-			if m.active == "library" {
-				dirs := m.browserDirs()
-				if m.libCursor < len(dirs) {
-					m.browser.Open(m.libIdxFromCursor())
-					m.libCursor = 0
-					m.libOffset = 0
-					m.selectedDir = ""
-					m.fileEntries = nil
-					m.tracksCursor = 0
-					m.tracksOffset = 0
-					m.searchMode = false
-					m.searchQuery = ""
-					if len(m.browserDirs()) > 0 {
-						m.selectDirAtCursor()
-					}
-				}
-			}
+		// case "l":
+		// 	if m.active == "library" {
+		// 		dirs := m.browserDirs()
+		// 		if m.libCursor < len(dirs) {
+		// 			m.browser.Open(m.libIdxFromCursor())
+		// 			m.libCursor = 0
+		// 			m.libOffset = 0
+		// 			m.selectedDir = ""
+		// 			m.fileEntries = nil
+		// 			m.tracksCursor = 0
+		// 			m.tracksOffset = 0
+		// 			m.searchMode = false
+		// 			m.searchQuery = ""
+		// 			if len(m.browserDirs()) > 0 {
+		// 				m.selectDirAtCursor()
+		// 			}
+		// 		}
+		// 	}
 		case "enter":
 			if m.active == "library" {
-				m.selectDirAtCursor()
+				dirs := m.browserDirs()
+				idx := m.libCursor
+				if m.searchMode && idx < len(m.searchIdx) {
+					idx = m.searchIdx[idx]
+				}
+				if idx < len(dirs) {
+					sel := dirs[idx]
+					if sel.Name != "•" && sel.IsDir {
+						// Enter directory (drill-down)
+						m.browser.Open(m.libIdxFromCursor(idx))
+						m.libCursor = 0
+						m.libOffset = 0
+						m.selectedDir = ""
+						m.fileEntries = nil
+						m.tracksCursor = 0
+						m.tracksOffset = 0
+						m.searchMode = false
+						m.searchQuery = ""
+						if len(m.browserDirs()) > 0 {
+							m.selectDirAtCursor()
+						}
+					}
+				}
 			} else if m.active == "tracks" {
 				entries := m.trackFileEntries()
 				idx := m.tracksCursor
@@ -817,6 +883,15 @@ func (m *model) rebuildSearch() {
 	}
 }
 
+func (m model) buildBreadCrumb() string {
+	parts := []string{"Library"}
+	for _, h := range m.browser.History {
+		parts = append(parts, filepath.Base(h))
+	}
+	parts = append(parts, m.browser.CurrentName())
+	return strings.Join(parts, " > ")
+}
+
 func waitForSongEnd(player *playback.Player, id int) tea.Cmd {
 	return func() tea.Msg {
 		player.Wait()
@@ -938,17 +1013,17 @@ func (m model) View() tea.View {
 		dirOffset = off
 	}
 	m.libraryPanel.SetData(components.LibData{
-		Entries:      dirSlice,
-		Title:        m.browser.CurrentName(),
-		Cursor:       m.libCursor,
-		Offset:       dirOffset,
-		Total:        len(dirs),
-		Active:       m.active == "library",
-		Width:        leftWidth,
-		Height:       libHeight,
-		SelectedPath: m.selectedDir,
-		SearchMode:   m.searchMode && m.active == "library",
-		SearchQuery:  m.searchQuery,
+		Entries:     dirSlice,
+		Title:       m.browser.CurrentName(),
+		Breadcrumb:  m.buildBreadCrumb(),
+		Cursor:      m.libCursor,
+		Offset:      dirOffset,
+		Total:       len(dirs),
+		Active:      m.active == "library",
+		Width:       leftWidth,
+		Height:      libHeight,
+		SearchMode:  m.searchMode && m.active == "library",
+		SearchQuery: m.searchQuery,
 	})
 
 	// queue panel (below library)
@@ -1043,6 +1118,7 @@ func (m model) View() tea.View {
 		Width:       rightWidth,
 		SearchMode:  m.searchMode && m.active == "tracks",
 		SearchQuery: m.searchQuery,
+		SubdirCount: m.subdirCount,
 	})
 
 	trackName := playingTrack.Title
@@ -1132,10 +1208,9 @@ func (m model) helpView() string {
 		items   [][2]string
 	}{
 		{"Navigation", [][2]string{
-			{"↑ / k , ↓ / j", "Move cursor"},
+			{"↑ / k , ↓ / j", "Move cursor (preview content)"},
 			{"Tab", "Switch panel"},
-			{"Enter", "Open directory / Play track"},
-			{"l", "Navigate into directory (alt)"},
+			{"Enter", "Drill into directory"},
 			{"Backspace / h", "Parent directory"},
 		}},
 		{"Search", [][2]string{

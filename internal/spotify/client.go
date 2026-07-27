@@ -29,6 +29,18 @@ func (cl *Client) GetUserProfile() (*UserProfile, error) {
 	return &profile, nil
 }
 
+func (cl *Client) LikedSongs() {
+
+}
+
+func (cl *Client) Playlists() {
+
+}
+
+func (cl *Client) PlaylistbyID(playlistID string) {
+
+}
+
 func (cl *Client) doRequest(method, url string, body io.Reader) ([]byte, error) {
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {

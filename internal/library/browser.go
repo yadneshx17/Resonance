@@ -130,3 +130,24 @@ func (b *Browser) CanGoBack() bool {
 func (b *Browser) CurrentName() string {
 	return filepath.Base(b.CurrentPath)
 }
+
+// checks if the folder has direct songs inside it.
+func (b *Browser) HasDirectSongs() bool {
+	for _, e := range b.Entries {
+		if !e.IsDir {
+			return true
+		}
+	}
+	return false
+}
+
+// returns Direct songs
+func (b *Browser) DirectSongs() []Entry {
+	var songs []Entry
+	for _, e := range b.Entries {
+		if !e.IsDir {
+			songs = append(songs, e)
+		}
+	}
+	return songs
+}

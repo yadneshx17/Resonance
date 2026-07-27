@@ -21,6 +21,7 @@ type TracksData struct {
 	Width       int
 	SearchMode  bool
 	SearchQuery string
+	SubdirCount int
 }
 
 type Tracks struct {
@@ -34,6 +35,7 @@ type Tracks struct {
 	width       int
 	searchMode  bool
 	searchQuery string
+	subdirCount int
 }
 
 func (t *Tracks) SetData(data TracksData) {
@@ -47,6 +49,7 @@ func (t *Tracks) SetData(data TracksData) {
 	t.width = data.Width
 	t.searchMode = data.SearchMode
 	t.searchQuery = data.SearchQuery
+	t.subdirCount = data.SubdirCount
 }
 
 func (t Tracks) buildBlock() string {
@@ -63,6 +66,15 @@ func (t Tracks) buildBlock() string {
 			return strings.Join(lines, "\n")
 		}
 		style := lipgloss.NewStyle().Width(contentWidth).Align(lipgloss.Center)
+		if t.subdirCount > 0 {
+			msg := fmt.Sprintf("Contains %d subdirector", t.subdirCount)
+			if t.subdirCount == 1 {
+				msg += "y"
+			} else {
+				msg += "ies"
+			}
+			return style.Render(msg)
+		}
 		return style.Render("No tracks in this directory")
 	}
 	seqWidth := 3
@@ -161,7 +173,7 @@ func (t Tracks) View() string {
 	return renderer.Render(content, renderer.Config{
 		Width:     t.width,
 		Height:    t.height,
-		Title:     "Tracks",
+		Title:     "Content",
 		InfoItems: info,
 		Active:    t.active,
 	})
