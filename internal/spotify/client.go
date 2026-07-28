@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 )
 
 type Client struct {
@@ -29,16 +30,56 @@ func (cl *Client) GetUserProfile() (*UserProfile, error) {
 	return &profile, nil
 }
 
-func (cl *Client) LikedSongs() {
-
+func (cl *Client) GetSavedTracks(limit, offset int) (*PagingObject[SavedTrack], error) {
+	url := baseURL + "/v1/me/tracks?limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset)
+	body, err := cl.doRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result PagingObject[SavedTrack]
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse saved tracks: %w", err)
+	}
+	return &result, nil
 }
 
-func (cl *Client) Playlists() {
-
+func (cl *Client) GetSavedAlbums(limit, offset int) (*PagingObject[SavedAlbum], error) {
+	url := baseURL + "/v1/me/albums?limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset)
+	body, err := cl.doRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result PagingObject[SavedAlbum]
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse saved albums: %w", err)
+	}
+	return &result, nil
 }
 
-func (cl *Client) PlaylistbyID(playlistID string) {
+func (cl *Client) GetPlaylists(limit, offset int) (*PagingObject[SpotifyPlaylist], error) {
+	url := baseURL + "/v1/me/playlists?limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset)
+	body, err := cl.doRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result PagingObject[SpotifyPlaylist]
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse playlists: %w", err)
+	}
+	return &result, nil
+}
 
+func (cl *Client) GetPlaylistTracks(playlistID string, limit, offset int) (*PagingObject[PlaylistTrackItem], error) {
+	url := baseURL + "/v1/playlists/" + playlistID + "/tracks?limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset)
+	body, err := cl.doRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result PagingObject[PlaylistTrackItem]
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse playlist tracks: %w", err)
+	}
+	return &result, nil
 }
 
 func (cl *Client) doRequest(method, url string, body io.Reader) ([]byte, error) {
@@ -59,6 +100,7 @@ func (cl *Client) doRequest(method, url string, body io.Reader) ([]byte, error) 
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
+	// auto-refresh access token
 	if resp.StatusCode == http.StatusUnauthorized {
 		if err := RefreshAccessToken(cl.creds); err != nil {
 			return nil, fmt.Errorf("token refresh failed: %w", err)

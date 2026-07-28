@@ -13,6 +13,7 @@ import (
 	"github.com/yadneshx17/resonance/internal/config"
 	"github.com/yadneshx17/resonance/internal/library"
 	"github.com/yadneshx17/resonance/internal/playback"
+	"github.com/yadneshx17/resonance/internal/spotify"
 	"github.com/yadneshx17/resonance/internal/types"
 
 	"github.com/yadneshx17/resonance/internal/components"
@@ -73,6 +74,30 @@ type model struct {
 
 	// Help
 	showHelp bool
+
+	// Source Switching
+	source          string // "local" | "spotify"
+	sourceSwitch    bool
+	spotifyClient   *spotify.Client
+	spotifyLoggedIn bool
+	sourceCursor    int // overlay selection (0=local, 1=spotify)
+
+	// Spotify browsing
+	spotifyCategory  int // o=Liked Songs, 1=Playlists, 2=Albums
+	spotifyItems     []types.Track
+	spotifyPlaylists []spotify.SpotifyPlaylist
+	spotifyAlbums    []spotify.SpotifyAlbum
+	spotifyTotal     int
+	spotifyOffset    int
+	spotifyHasMore   bool
+	spotifyLoading   bool
+	spotifyErr       string
+	spotifyCursor    int
+	spotifyScroll    int
+
+	// Spotify drill-down (playlists)
+	spotifyPlaylistDrill bool
+	spotifyDrillName     string
 }
 
 type (
@@ -109,6 +134,17 @@ func Run() {
 		}
 		m.browser = b
 		m.selectDirAtCursor()
+	}
+
+	if spotify.CredentialsExist() {
+		cred, err := spotify.LoadCredentials()
+		if err != nil {
+			fmt.Printf("Error Loading Cred: %v\n", err)
+			os.Exit(1)
+		}
+
+		m.spotifyClient = spotify.NewClient(cred)
+		m.spotifyLoggedIn = true
 	}
 
 	p := tea.NewProgram(m)
@@ -295,6 +331,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		if m.sourceSwitch {
+			switch msg.String() {
+			case "esc":
+				m.sourceSwitch = false
+			}
+		}
+
 		// Search mode intercepts printable keys first
 		if m.searchMode {
 			switch msg.String() {
@@ -431,7 +474,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								Album:    e.Album,
 								CoverArt: e.CoverArt,
 								Duration: e.Duration,
-								Source:   types.SourceLocal,
+								Source:   types.Local,
 							})
 						}
 					} else {
@@ -456,7 +499,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						Album:    e.Album,
 						CoverArt: e.CoverArt,
 						Duration: e.Duration,
-						Source:   types.SourceLocal,
+						Source:   types.Local,
 					}
 					m.queue.Add(track)
 				}
@@ -563,7 +606,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						Album:    e.Album,
 						CoverArt: e.CoverArt,
 						Duration: e.Duration,
-						Source:   types.SourceLocal,
+						Source:   types.Local,
 					}
 					m.queue.Add(track)
 					m.queue.SetCurrent(0)
@@ -693,6 +736,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "?":
 			m.showHelp = !m.showHelp
+
+		case "ctrl+s":
+			m.sourceSwitch = true
+
 		}
 
 	case tickMsg:
@@ -952,9 +999,22 @@ func (m model) setupView() tea.View {
 	}
 }
 
+func (m model) sourceSwitchView() tea.View {
+	// TODO: implement source switch overlay
+	s := "Source Switch (coming soon)"
+	placed := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, s)
+	return tea.View{
+		AltScreen: true,
+		Content:   m.fillBg(placed),
+	}
+}
+
 func (m model) View() tea.View {
 	if m.setup {
 		return m.setupView()
+	}
+	if m.sourceSwitch {
+		return m.sourceSwitchView()
 	}
 
 	if m.tooSmall {

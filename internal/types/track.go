@@ -16,7 +16,6 @@ type Track struct {
 type Source int
 
 const (
-	SourceLocal Source = iota
-	SourceSpotify
-	SourceJam
+	Local Source = iota
+	Spotify
 )

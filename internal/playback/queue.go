@@ -114,7 +114,7 @@ func (q *Queue) ScanDir(root string) ([]types.Track, error) {
 			Album:    meta.Album,
 			CoverArt: meta.CoverArt,
 			Duration: meta.Duration,
-			Source:   types.SourceLocal,
+			Source:   types.Local,
 		})
 		return nil
 	})

@@ -79,7 +79,7 @@ func (l Library) buildLibBlock() string {
 		}
 		icon := common.Directory
 		if e.Name == "•" {
-			icon = common.Music
+			icon = "./"
 		}
 		line := icon + " " + name
 		if l.active && l.libCursor == idx {
