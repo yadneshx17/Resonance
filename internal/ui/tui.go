@@ -61,11 +61,12 @@ type model struct {
 	setupInput string
 
 	// Componnets
-	top          *components.Top
-	libraryPanel *components.Library
-	tracksPanel  *components.Tracks
-	queuePanel   *components.Queue
-	footer       *components.Footer
+	top               *components.Top
+	libraryPanel      *components.Library
+	tracksPanel       *components.Tracks
+	queuePanel        *components.Queue
+	footer            *components.Footer
+	sourceSwitchPanel *components.SourceSwitch
 
 	// Search
 	searchMode  bool
@@ -107,16 +108,17 @@ type (
 
 func Run() {
 	m := model{
-		player:       playback.NewPlayer(),
-		queue:        playback.NewQueue(),
-		active:       "library",
-		height:       24,
-		width:        80,
-		top:          &components.Top{},
-		libraryPanel: &components.Library{},
-		tracksPanel:  &components.Tracks{},
-		queuePanel:   &components.Queue{},
-		footer:       &components.Footer{},
+		player:            playback.NewPlayer(),
+		queue:             playback.NewQueue(),
+		active:            "library",
+		height:            24,
+		width:             80,
+		top:               &components.Top{},
+		libraryPanel:      &components.Library{},
+		tracksPanel:       &components.Tracks{},
+		queuePanel:        &components.Queue{},
+		footer:            &components.Footer{},
+		sourceSwitchPanel: &components.SourceSwitch{},
 	}
 	if !config.ConfigExists() {
 		m.setup = true
@@ -333,9 +335,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.sourceSwitch {
 			switch msg.String() {
-			case "esc":
+			case "up", "k":
+				if m.sourceCursor > 0 {
+					m.sourceCursor--
+				}
+			case "down", "j":
+				if m.sourceCursor < 1 {
+					m.sourceCursor++
+				}
+			case "enter":
+				if m.sourceCursor == 1 && !m.spotifyLoggedIn {
+					// can't switch to spotify if not logged in
+					// some kind of actionable indicator for USER
+				} else {
+					m.source = []string{"local", "spotify"}[m.sourceCursor]
+					m.sourceSwitch = false
+					if m.source == "spotify" {
+						m.spotifyCategory = 0
+						m.spotifyCursor = 0
+						m.spotifyItems = nil
+						m.spotifyPlaylists = nil
+						m.spotifyAlbums = nil
+						m.spotifyPlaylistDrill = false
+						return m, nil
+					}
+				}
+			case "esc", "ctrl+s":
 				m.sourceSwitch = false
 			}
+			return m, nil
 		}
 
 		// Search mode intercepts printable keys first
@@ -999,9 +1027,82 @@ func (m model) setupView() tea.View {
 	}
 }
 
-func (m model) sourceSwitchView() tea.View {
-	// TODO: implement source switch overlay
-	s := "Source Switch (coming soon)"
+func splitAtVisualPos(s string, pos int) (string, string) {
+	var before, rest strings.Builder
+	visualCol := 0
+	runes := []rune(s)
+	i := 0
+	for i < len(runes) {
+		if runes[i] == '\x1b' {
+			before.WriteRune(runes[i])
+			i++
+			for i < len(runes) {
+				before.WriteRune(runes[i])
+				ch := runes[i]
+				if (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') {
+					i++
+					break
+				}
+				i++
+			}
+			continue
+		}
+		if visualCol < pos {
+			before.WriteRune(runes[i])
+		} else {
+			rest.WriteRune(runes[i])
+		}
+		visualCol++
+		i++
+	}
+	return before.String(), rest.String()
+}
+
+func placeOverlay(termW, termH int, overlay, bg string) string {
+	bgLines := strings.Split(bg, "\n")
+	oLines := strings.Split(overlay, "\n")
+
+	boxW := 0
+	for _, l := range oLines {
+		if w := lipgloss.Width(l); w > boxW {
+			boxW = w
+		}
+	}
+	boxH := len(oLines)
+
+	ox := (termW - boxW) / 2
+	oy := (termH - boxH) / 2
+
+	for len(bgLines) < termH {
+		bgLines = append(bgLines, strings.Repeat(" ", termW))
+	}
+
+	for i, oLine := range oLines {
+		row := oy + i
+		if row < 0 || row >= len(bgLines) {
+			continue
+		}
+		left, right := splitAtVisualPos(bgLines[row], ox)
+		_, rightAfterBox := splitAtVisualPos(right, boxW)
+		bgLines[row] = left + oLine + rightAfterBox
+	}
+
+	return strings.Join(bgLines, "\n")
+}
+
+func (m model) tooSmallView() tea.View {
+	badStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#d46159")).Bold(true)
+
+	wStr := fmt.Sprintf("%d", m.width)
+	if m.width < 84 {
+		wStr = badStyle.Render(fmt.Sprintf("%d", m.width))
+	}
+	hStr := fmt.Sprintf("%d", m.height)
+	if m.height < 28 {
+		hStr = badStyle.Render(fmt.Sprintf("%d", m.height))
+	}
+
+	s := fmt.Sprintf("Terminal size too small\nWidth = %s  Height = %s\n\nNeeded for current config\nWidth >= 84, Height >= 28", wStr, hStr)
 	placed := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, s)
 	return tea.View{
 		AltScreen: true,
@@ -1013,30 +1114,36 @@ func (m model) View() tea.View {
 	if m.setup {
 		return m.setupView()
 	}
-	if m.sourceSwitch {
-		return m.sourceSwitchView()
-	}
-
 	if m.tooSmall {
-		badStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#d46159")).Bold(true)
-
-		wStr := fmt.Sprintf("%d", m.width)
-		if m.width < 84 {
-			wStr = badStyle.Render(fmt.Sprintf("%d", m.width))
-		}
-		hStr := fmt.Sprintf("%d", m.height)
-		if m.height < 28 {
-			hStr = badStyle.Render(fmt.Sprintf("%d", m.height))
-		}
-
-		s := fmt.Sprintf("Terminal size too small\nWidth = %s  Height = %s\n\nNeeded for current config\nWidth >= 84, Height >= 28", wStr, hStr)
-		placed := lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, s)
-		return tea.View{
-			AltScreen: true,
-			Content:   m.fillBg(placed),
-		}
+		return m.tooSmallView()
 	}
 
+	s := m.buildMainView()
+
+	if m.sourceSwitch {
+		m.sourceSwitchPanel.SetData(components.SourceSwitchData{
+			Visible:      true,
+			SourceCursor: m.sourceCursor,
+			SpotifyOK:    m.spotifyLoggedIn,
+			Width:        m.width,
+			Height:       m.height,
+		})
+		box := m.sourceSwitchPanel.View()
+		s = placeOverlay(m.width, m.height, box, s)
+	}
+
+	if m.showHelp {
+		box := m.helpBox()
+		s = placeOverlay(m.width, m.height, box, s)
+	}
+
+	return tea.View{
+		AltScreen: true,
+		Content:   m.fillBg(s),
+	}
+}
+
+func (m model) buildMainView() string {
 	topHeight := 1
 	footerHeight := 11
 	mainHeight := m.height - topHeight - footerHeight
@@ -1246,17 +1353,10 @@ func (m model) View() tea.View {
 			Render("?  help"),
 	)
 
-	if m.showHelp {
-		s = m.helpView()
-	}
-
-	return tea.View{
-		AltScreen: true,
-		Content:   m.fillBg(s),
-	}
+	return s
 }
 
-func (m model) helpView() string {
+func (m model) helpBox() string {
 	helpW := 54
 	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#B4BEFE"))
 	sep := lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086")).Render("│")
@@ -1268,7 +1368,8 @@ func (m model) helpView() string {
 		items   [][2]string
 	}{
 		{"Navigation", [][2]string{
-			{"↑ / k , ↓ / j", "Move cursor (preview content)"},
+			{"↑ / k , ↓ / j", "Move cursor (preview "},
+			{"", "content)"},
 			{"Tab", "Switch panel"},
 			{"Enter", "Drill into directory"},
 			{"Backspace / h", "Parent directory"},
@@ -1294,6 +1395,7 @@ func (m model) helpView() string {
 		{"General", [][2]string{
 			{"q / Ctrl+C", "Quit"},
 			{"?", "Close this help"},
+			{"esc", "Close"},
 		}},
 	}
 
@@ -1323,10 +1425,10 @@ func (m model) helpView() string {
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#45475A")).
+		BorderForeground(lipgloss.Color("#A6E3A1")).
 		Padding(1, 3).
 		Width(helpW).
 		Render(b.String())
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+	return box
 }
