@@ -36,6 +36,7 @@ func (s SourceSwitch) View() string {
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#CBA6F7"))
 
 	items := []string{}
+	boxWidth := 30
 	for i, label := range []string{"Local", "Spotify"} {
 		prefix := "  "
 		style := dimStyle
@@ -45,6 +46,7 @@ func (s SourceSwitch) View() string {
 		}
 		suffix := ""
 		if i == 1 && !s.spotifyOK {
+			boxWidth = 35
 			suffix = dimStyle.Render(" (not logged in)")
 		}
 		items = append(items, "  "+style.Render(prefix+label)+suffix)
@@ -56,7 +58,7 @@ func (s SourceSwitch) View() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#A6E3A1")).
 		Padding(1, 3).
-		Width(30).
+		Width(boxWidth).
 		Render(content)
 
 	return box
