@@ -362,6 +362,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case "esc", "ctrl+s":
 				m.sourceSwitch = false
+
+			case "ctrl+c":
+				return m, tea.Quit
 			}
 			return m, nil
 		}
