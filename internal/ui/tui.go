@@ -329,6 +329,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.String() {
 			case "?", "esc", "q":
 				m.showHelp = false
+			case "ctrl+c":
+				return m, tea.Quit
 			}
 			return m, nil
 		}
@@ -1361,10 +1363,11 @@ func (m model) buildMainView() string {
 
 func (m model) helpBox() string {
 	helpW := 54
+	header := lipgloss.NewStyle().Bold(true).Italic(true).Foreground(lipgloss.Color("#FFFFFF"))
 	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#B4BEFE"))
 	sep := lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086")).Render("│")
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086"))
-	header := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#A6E3A1"))
+	subheader := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#A6E3A1"))
 
 	groups := []struct {
 		section string
@@ -1397,8 +1400,8 @@ func (m model) helpBox() string {
 		}},
 		{"General", [][2]string{
 			{"q / Ctrl+C", "Quit"},
-			{"?", "Close this help"},
 			{"esc", "Close"},
+			{"?", "Close this help"},
 		}},
 	}
 
@@ -1413,12 +1416,29 @@ func (m model) helpBox() string {
 	}
 
 	var b strings.Builder
+
+	hstr := header.AlignHorizontal(lipgloss.Center).AlignVertical(lipgloss.Center).Render("Keyboard Shortcuts")
+
+	var bar string
+	for i := 0; i < helpW-9; i++ {
+		// bar += "─"
+		bar += " "
+	}
+
+	b.WriteString(hstr + "\n")
+	b.WriteString(bar + "\n")
+
 	for _, g := range groups {
-		b.WriteString(header.Render(g.section) + "\n")
+		b.WriteString(subheader.Render(g.section) + "\n")
 		for _, item := range g.items {
 			key := item[0]
-			padded := key + strings.Repeat(" ", maxKeyW-lipgloss.Width(key))
-			line := fmt.Sprintf("  %s  %s  %s", keyStyle.Render(padded), sep, item[1])
+			paddingLen := maxKeyW - lipgloss.Width(key)
+			if paddingLen < 0 {
+				paddingLen = 0
+			}
+			padded := key + strings.Repeat(" ", paddingLen)
+
+			line := fmt.Sprintf("%s %s %s", keyStyle.Render(padded), sep, item[1])
 			b.WriteString(line + "\n")
 		}
 		b.WriteString("\n")
