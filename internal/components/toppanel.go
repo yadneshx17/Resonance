@@ -8,19 +8,27 @@ import (
 
 type Top struct {
 	trackCount int
+	source     string
 }
 
-func (t *Top) SetTrackCount(n int) {
+func (t *Top) SetTrackCount(n int, source string) {
 	t.trackCount = n
+	t.source = source
 }
 
 func (t *Top) View(height, width int) string {
 	left := "  Resonance   "
-	if t.trackCount == 1 {
-		left += "1 track"
+
+	if t.source != "spotify" {
+		if t.trackCount == 1 {
+			left += "1 track"
+		} else {
+			left += fmt.Sprintf(" ‣ %d tracks", t.trackCount)
+		}
 	} else {
-		left += fmt.Sprintf(" ‣%d tracks", t.trackCount)
+		left += fmt.Sprint("‣" + " Spotify")
 	}
+
 	hint := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#6C7086")).
 		Render(" <?> help  ")

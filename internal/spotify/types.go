@@ -43,24 +43,27 @@ type SpotifyArtist struct {
 }
 
 type SpotifyAlbum struct {
-	ID      string          `json:"id"`
-	Name    string          `json:"name"`
-	Images  []SpotifyImage  `json:"images"`
-	Artists []SpotifyArtist `json:"artists"`
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Images      []SpotifyImage  `json:"images"`
+	Artists     []SpotifyArtist `json:"artists"`
+	TotalTracks int             `json:"total_tracks"`
 }
 
 type SpotifyTrack struct {
-	ID         string          `json:"id"`
-	Name       string          `json:"name"`
-	DurationMs int             `json:"duration_ms"`
-	Album      SpotifyAlbum    `json:"album"`
-	Artists    []SpotifyArtist `json:"artists"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	DurationMs int    `json:"duration_ms"`
+	// PlaylistName SpotifyPlaylist `json:"name"`
+	Album   SpotifyAlbum    `json:"album"`
+	Artists []SpotifyArtist `json:"artists"`
 }
 
 type SpotifyPlaylist struct {
 	ID          string                          `json:"id"`
 	Name        string                          `json:"name"`
 	Description string                          `json:"description"`
+	Public      *bool                           `json:"public"`
 	Images      []SpotifyImage                  `json:"images"`
 	Tracks      PagingObject[PlaylistTrackItem] `json:"tracks"`
 }

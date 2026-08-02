@@ -77,40 +77,96 @@ type model struct {
 	showHelp bool
 
 	// Source Switching
-	source          string // "local" | "spotify"
-	sourceSwitch    bool
-	spotifyClient   *spotify.Client
-	spotifyLoggedIn bool
-	sourceCursor    int // overlay selection (0=local, 1=spotify)
+	source       string // "local" | "spotify"
+	sourceSwitch bool
+	sourceCursor int // overlay selection (0=local, 1=spotify)
 
 	// Spotify browsing
-	spotifyCategory  int // o=Liked Songs, 1=Playlists, 2=Albums
+	spotifyClient   *spotify.Client
+	spotifyLoggedIn bool
+
+	spotifyCategory  int // 0=Liked Songs, 1=Playlists, 2=Albums
 	spotifyItems     []types.Track
 	spotifyPlaylists []spotify.SpotifyPlaylist
-	spotifyAlbums    []spotify.SpotifyAlbum
+	spotifyAlbums    []spotify.SavedAlbum
 	spotifyTotal     int
 	spotifyOffset    int
 	spotifyHasMore   bool
 	spotifyLoading   bool
 	spotifyErr       string
-	spotifyCursor    int
-	spotifyScroll    int
+	spotifyCursor    int // library category cursor (0-2)
+	spotifyScroll    int // content panel scroll
 
-	// Spotify drill-down (playlists)
-	spotifyPlaylistDrill bool
-	spotifyDrillName     string
+	// API total of the currently loaded playlists/albums list. Kept separate
+	// from spotifyTotal because a drill overwrites spotifyTotal with the
+	// drill's track total; this lets us restore the list state on exit.
+	spotifyListTotal int
+
+	// Spotify drill-down (playlists / albums)
+	spotifyDrillType string // "" | "playlist" | "album"
+	spotifyDrillID   string // playlist or album ID for refetches
+	spotifyDrillName string // content title when drilled
+
+	// Spotify content panel cursor (independent of library cursor)
+	spotifyContentCursor int
+
+	// Cursor/scroll position saved when drilling into a playlist/album and
+	// restored on backspace, so the list returns to where the user left.
+	spotifyContentCursorBackup int
+	spotifyScrollBackup        int
 }
 
+// Messages
 type (
 	tickMsg      time.Time
 	songEndedMsg struct{ id int }
 )
+
+type spotifyTracksMsg struct {
+	items    []types.Track
+	total    int
+	offset   int
+	category int // stale-response guard (M5)
+}
+
+type spotifyPlaylistsMsg struct {
+	playlists []spotify.SpotifyPlaylist
+	total     int
+	offset    int
+	category  int // stale-response guard (M5)
+}
+
+type spotifyPlaylistTracksMsg struct {
+	items  []types.Track
+	total  int
+	offset int
+	name   string // name of the playlist
+}
+
+type spotifyAlbumsMsg struct {
+	albums   []spotify.SavedAlbum
+	total    int
+	offset   int
+	category int // stale-response guard (M5)
+}
+
+type spotifyAlbumTracksMsg struct {
+	items  []types.Track
+	total  int
+	offset int
+	name   string // name of the album
+}
+
+type spotifyErrorMsg struct {
+	err string
+}
 
 func Run() {
 	m := model{
 		player:            playback.NewPlayer(),
 		queue:             playback.NewQueue(),
 		active:            "library",
+		source:            "local",
 		height:            24,
 		width:             80,
 		top:               &components.Top{},
@@ -299,13 +355,44 @@ func (m model) dirTrackCount() int {
 	return len(m.trackFileEntries())
 }
 
-func (m model) visibleRows() int {
-	if m.height == 0 {
-		return 20
+// contentHeight returns the height of the main layout area: the full window
+// minus the top bar (1 line) and footer (11 lines).
+func (m model) contentHeight() int {
+	n := m.height - 12
+	if n < 0 {
+		return 0
 	}
-	// mainHeight = m.height - top(1) - footer(11)
-	// trackVis = mainHeight - 2 = m.height - 14
-	n := m.height - 14
+	return n
+}
+
+// libHeight / libVis mirror the library panel sizing in buildMainView.
+func (m model) libHeight() int {
+	n := m.contentHeight() * 30 / 100
+	if n < 3 {
+		return 3
+	}
+	return n
+}
+
+func (m model) libVis() int {
+	return m.libHeight() - 2
+}
+
+func (m model) queueVis() int {
+	n := m.contentHeight() - m.libHeight() - 2
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+// trackVis returns the number of data rows that fit in the tracks/content
+// panel. The panel is contentHeight tall; two rows are its borders and two
+// more are the header + separator line, so the data area is contentHeight-4.
+// Keeping this identical to buildMainView's slicing is what guarantees the
+// cursor can never scroll below the visible area.
+func (m model) trackVis() int {
+	n := m.contentHeight() - 4
 	if n < 0 {
 		return 0
 	}
@@ -353,13 +440,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.source = []string{"local", "spotify"}[m.sourceCursor]
 					m.sourceSwitch = false
 					if m.source == "spotify" {
-						m.spotifyCategory = 0
 						m.spotifyCursor = 0
 						m.spotifyItems = nil
 						m.spotifyPlaylists = nil
 						m.spotifyAlbums = nil
-						m.spotifyPlaylistDrill = false
-						return m, nil
+						m.spotifyDrillType = ""
+						m.spotifyDrillID = ""
+						m.spotifyDrillName = ""
+						m.spotifyContentCursor = 0
+						m.spotifyScroll = 0
+						return m.loadCategory(0)
 					}
 				}
 			case "esc", "ctrl+s":
@@ -417,6 +507,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "right":
 			// reserved
 		case "up", "k":
+			if m.source == "spotify" && (m.active == "library" || m.active == "tracks") {
+				return m.handleSpotifyUp()
+			}
+
 			if m.active == "library" {
 				if m.libCursor > 0 {
 					m.libCursor--
@@ -439,21 +533,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "down", "j":
-			mainHeight := m.height - 12
-			libHeight := mainHeight * 30 / 100
-			if libHeight < 3 {
-				libHeight = 3
+			if m.source == "spotify" && (m.active == "library" || m.active == "tracks") {
+				return m.handleSpotifyDown()
 			}
-			libVis := libHeight - 2
-			if libVis < 0 {
-				libVis = 0
-			}
-			queueHeight := mainHeight - libHeight
-			queueVis := queueHeight - 2
-			if queueVis < 0 {
-				queueVis = 0
-			}
-			trackVis := m.visibleRows()
+
+			libVis := m.libVis()
+			queueVis := m.queueVis()
+			trackVis := m.trackVis()
 			if m.active == "library" {
 				maxLen := len(m.browserDirs())
 				if m.searchMode {
@@ -490,6 +576,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "a":
+			if m.source == "spotify" {
+				return m.handleSpotifySmallA()
+			}
+
 			if m.active == "library" {
 				dirs := m.browserDirs()
 				idx := m.libCursor
@@ -562,7 +652,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.queueOffset = max(0, m.queue.Len()-1)
 				}
 			}
-		case "esc", "h":
+		case "backspace", "h":
+			if m.source == "spotify" {
+				return m.handleSpotifyBackspace()
+			}
+
 			if m.active == "library" {
 				m.selectedDir = ""
 				m.fileEntries = nil
@@ -577,25 +671,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.selectDirAtCursor()
 				}
 			}
-		// case "l":
-		// 	if m.active == "library" {
-		// 		dirs := m.browserDirs()
-		// 		if m.libCursor < len(dirs) {
-		// 			m.browser.Open(m.libIdxFromCursor())
-		// 			m.libCursor = 0
-		// 			m.libOffset = 0
-		// 			m.selectedDir = ""
-		// 			m.fileEntries = nil
-		// 			m.tracksCursor = 0
-		// 			m.tracksOffset = 0
-		// 			m.searchMode = false
-		// 			m.searchQuery = ""
-		// 			if len(m.browserDirs()) > 0 {
-		// 				m.selectDirAtCursor()
-		// 			}
-		// 		}
-		// 	}
 		case "enter":
+			if m.source == "spotify" && m.active == "tracks" {
+				return m.handleSpotifyContentEnter()
+			}
+			if m.source == "spotify" && m.active == "library" {
+				// library panel: content already hover-loaded, nothing to do
+				return m, nil
+			}
+
 			if m.active == "library" {
 				dirs := m.browserDirs()
 				idx := m.libCursor
@@ -661,7 +745,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.errMsg = ""
 				m.player.Stop()
 				m.queue.SetCurrent(idx)
-				vis := m.visibleRows()
+				vis := m.queueVis()
 				if m.queueCursor < m.queueOffset {
 					m.queueOffset = m.queueCursor
 				} else if m.queueCursor >= m.queueOffset+vis {
@@ -689,7 +773,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.player.Stop()
 				m.queueCursor = (m.queueCursor + 1) % m.queue.Len()
 				m.queue.SetCurrent(m.queueCursor)
-				vis := m.visibleRows()
+				vis := m.queueVis()
 				if m.queueCursor >= m.queueOffset+vis {
 					m.queueOffset = m.queueCursor - vis + 1
 				}
@@ -788,7 +872,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.playingID++
 		m.queueCursor = (m.queueCursor + 1) % m.queue.Len()
 		m.queue.SetCurrent(m.queueCursor)
-		vis := m.visibleRows()
+		vis := m.queueVis()
 		if m.queueCursor >= m.queueOffset+vis {
 			m.queueOffset = m.queueCursor - vis + 1
 		}
@@ -798,6 +882,93 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.player.Load(track)
 		m.player.Play()
 		return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
+
+	case spotifyTracksMsg:
+		m.spotifyLoading = false
+		if msg.category != m.spotifyCategory || m.spotifyDrillType != "" {
+			// stale hover response — a newer category is active
+			return m, nil
+		}
+		if msg.offset == 0 {
+			m.spotifyItems = msg.items
+		} else {
+			m.spotifyItems = append(m.spotifyItems, msg.items...)
+		}
+		m.spotifyTotal = msg.total
+		m.spotifyOffset = msg.offset + len(msg.items)
+		m.spotifyHasMore = m.spotifyOffset < msg.total
+		return m, nil
+
+	case spotifyPlaylistsMsg:
+		m.spotifyLoading = false
+		if msg.category != m.spotifyCategory || m.spotifyDrillType != "" {
+			return m, nil
+		}
+		if msg.offset == 0 {
+			m.spotifyPlaylists = msg.playlists
+		} else {
+			m.spotifyPlaylists = append(m.spotifyPlaylists, msg.playlists...)
+		}
+		m.spotifyTotal = msg.total
+		m.spotifyListTotal = msg.total
+		m.spotifyOffset = msg.offset + len(msg.playlists)
+		m.spotifyHasMore = m.spotifyOffset < msg.total
+		return m, nil
+
+	case spotifyPlaylistTracksMsg:
+		m.spotifyLoading = false
+		if m.spotifyDrillType != "playlist" {
+			// stale drill response
+			return m, nil
+		}
+		if msg.offset == 0 {
+			m.spotifyItems = msg.items
+			m.spotifyDrillName = msg.name // name of the playlist
+		} else {
+			m.spotifyItems = append(m.spotifyItems, msg.items...)
+		}
+		m.spotifyTotal = msg.total
+		m.spotifyOffset = msg.offset + len(msg.items)
+		m.spotifyHasMore = m.spotifyOffset < msg.total
+		return m, nil
+
+	case spotifyAlbumsMsg:
+		m.spotifyLoading = false
+		if msg.category != m.spotifyCategory || m.spotifyDrillType != "" {
+			return m, nil
+		}
+		if msg.offset == 0 {
+			m.spotifyAlbums = msg.albums
+		} else {
+			m.spotifyAlbums = append(m.spotifyAlbums, msg.albums...)
+		}
+		m.spotifyTotal = msg.total
+		m.spotifyListTotal = msg.total
+		m.spotifyOffset = msg.offset + len(msg.albums)
+		m.spotifyHasMore = m.spotifyOffset < msg.total
+		return m, nil
+
+	case spotifyAlbumTracksMsg:
+		m.spotifyLoading = false
+		if m.spotifyDrillType != "album" {
+			return m, nil
+		}
+		if msg.offset == 0 {
+			m.spotifyItems = msg.items
+			m.spotifyDrillName = msg.name // name of the album
+		} else {
+			m.spotifyItems = append(m.spotifyItems, msg.items...)
+		}
+		m.spotifyTotal = msg.total
+		m.spotifyOffset = msg.offset + len(msg.items)
+		m.spotifyHasMore = m.spotifyOffset < msg.total
+		return m, nil
+
+	case spotifyErrorMsg:
+		m.spotifyLoading = false
+		m.spotifyErr = msg.err
+		return m, nil
+
 	}
 	return m, nil
 }
@@ -1148,55 +1319,88 @@ func (m model) View() tea.View {
 	}
 }
 
+// func dummyEnteries() []types.Entry {
+// 	var dir []types.Entry
+// 	for i := 0; i < 5; i++ {
+// 		dir = append(dir,
+// 			types.Entry{
+// 				Name:     fmt.Sprintf("hello%d", i),
+// 				Path:     fmt.Sprintf("path%d", i),
+// 				IsDir:    false,
+// 				Title:    fmt.Sprintf("title%d", i),
+// 				Artist:   fmt.Sprintf("artist%d", i),
+// 				Album:    fmt.Sprintf("album%d", i),
+// 				Duration: time.Duration(0), // Or omit entirely for default 0 value
+// 				CoverArt: []byte{},         // Or nil
+// 			},
+// 		)
+// 	}
+// 	return dir
+// }
+
 func (m model) buildMainView() string {
 	topHeight := 1
 	footerHeight := 11
-	mainHeight := m.height - topHeight - footerHeight
+	mainHeight := m.contentHeight()
 
 	leftWidth := m.width * 35 / 100
 	rightWidth := m.width - leftWidth
 
-	libHeight := mainHeight * 30 / 100
-	if libHeight < 3 {
-		libHeight = 3
-	}
+	libHeight := m.libHeight()
 	queueHeight := mainHeight - libHeight
 
 	// filter dir only entries for library
-	dirs := m.browserDirs()
-	if m.active == "library" && m.searchMode && len(m.searchIdx) > 0 {
-		filtered := make([]types.Entry, len(m.searchIdx))
-		for i, idx := range m.searchIdx {
-			filtered[i] = dirs[idx]
+	if m.source == "spotify" {
+		m.libraryPanel.SetData(components.LibData{
+			Entries:     spotifyCategories(),
+			Title:       "Spotify",
+			Breadcrumb:  "Spotify",
+			Cursor:      m.spotifyCursor,
+			Offset:      0,
+			Total:       3,
+			Active:      m.active == "library",
+			Width:       leftWidth,
+			Height:      libHeight,
+			SearchMode:  false,
+			SearchQuery: "",
+		})
+	} else {
+		dirs := m.browserDirs()
+		if m.active == "library" && m.searchMode && len(m.searchIdx) > 0 {
+			filtered := make([]types.Entry, len(m.searchIdx))
+			for i, idx := range m.searchIdx {
+				filtered[i] = dirs[idx]
+			}
+			dirs = filtered
 		}
-		dirs = filtered
+		dirSlice := dirs
+		dirOffset := 0
+		if len(dirs) > libHeight-2 {
+			off := m.libOffset
+			if off > len(dirs)-libHeight+2 {
+				off = len(dirs) - libHeight + 2
+			}
+			if off < 0 {
+				off = 0
+			}
+			dirSlice = dirs[off : off+libHeight-2]
+			dirOffset = off
+		}
+
+		m.libraryPanel.SetData(components.LibData{
+			Entries:     dirSlice,
+			Title:       m.browser.CurrentName(),
+			Breadcrumb:  m.buildBreadCrumb(),
+			Cursor:      m.libCursor,
+			Offset:      dirOffset,
+			Total:       len(dirs),
+			Active:      m.active == "library",
+			Width:       leftWidth,
+			Height:      libHeight,
+			SearchMode:  m.searchMode && m.active == "library",
+			SearchQuery: m.searchQuery,
+		})
 	}
-	dirSlice := dirs
-	dirOffset := 0
-	if len(dirs) > libHeight-2 {
-		off := m.libOffset
-		if off > len(dirs)-libHeight+2 {
-			off = len(dirs) - libHeight + 2
-		}
-		if off < 0 {
-			off = 0
-		}
-		dirSlice = dirs[off : off+libHeight-2]
-		dirOffset = off
-	}
-	m.libraryPanel.SetData(components.LibData{
-		Entries:     dirSlice,
-		Title:       m.browser.CurrentName(),
-		Breadcrumb:  m.buildBreadCrumb(),
-		Cursor:      m.libCursor,
-		Offset:      dirOffset,
-		Total:       len(dirs),
-		Active:      m.active == "library",
-		Width:       leftWidth,
-		Height:      libHeight,
-		SearchMode:  m.searchMode && m.active == "library",
-		SearchQuery: m.searchQuery,
-	})
 
 	// queue panel (below library)
 	tracks := m.queue.List()
@@ -1209,10 +1413,7 @@ func (m model) buildMainView() string {
 	}
 	queueSlice := tracks
 	queueOffset := 0
-	queueVis := queueHeight - 2
-	if queueVis < 0 {
-		queueVis = 0
-	}
+	queueVis := m.queueVis()
 	if len(tracks) > queueVis {
 		off := m.queueOffset
 		if off > len(tracks)-queueVis {
@@ -1250,48 +1451,133 @@ func (m model) buildMainView() string {
 	})
 
 	// tracks panel (right side)
-	fileEntries := m.fileEntries
-	if fileEntries == nil {
-		fileEntries = m.trackFileEntries()
-	}
-	if m.active == "tracks" && m.searchMode && len(m.searchIdx) > 0 {
-		filtered := make([]types.Entry, len(m.searchIdx))
-		for i, idx := range m.searchIdx {
-			filtered[i] = fileEntries[idx]
-		}
-		fileEntries = filtered
-	}
-	fileSlice := fileEntries
-	fileOffset := 0
-	trackVis := mainHeight - 2
-	if trackVis < 0 {
-		trackVis = 0
-	}
-	if len(fileEntries) > trackVis {
-		off := m.tracksOffset
-		if off > len(fileEntries)-trackVis {
-			off = len(fileEntries) - trackVis
-		}
-		if off < 0 {
-			off = 0
-		}
-		fileSlice = fileEntries[off : off+trackVis]
-		fileOffset = off
-	}
 	playingTrack := m.player.CurrentTrack()
-	m.tracksPanel.SetData(components.TracksData{
-		Entries:     fileSlice,
-		PlayingPath: playingTrack.Path,
-		Cursor:      m.tracksCursor,
-		Offset:      fileOffset,
-		Total:       len(fileEntries),
-		Active:      m.active == "tracks",
-		Height:      mainHeight,
-		Width:       rightWidth,
-		SearchMode:  m.searchMode && m.active == "tracks",
-		SearchQuery: m.searchQuery,
-		SubdirCount: m.subdirCount,
-	})
+
+	if m.source == "spotify" {
+		if m.spotifyErr != "" {
+			m.tracksPanel.SetData(components.TracksData{
+				ContentType:  "error",
+				ErrorMessage: m.spotifyErr,
+				Title:        "Spotify",
+				Active:       m.active == "tracks",
+				Height:       mainHeight,
+				Width:        rightWidth,
+			})
+		} else {
+			trackVis := m.trackVis()
+
+			var contentType, title string
+			var trackSlice []types.Track
+			var playlistSlice []spotify.SpotifyPlaylist
+			var albumSlice []spotify.SavedAlbum
+			switch {
+			case m.spotifyDrillType != "":
+				contentType, title = "spotify-tracks", m.spotifyDrillName
+			case m.spotifyCategory == 0:
+				contentType, title = "spotify-tracks", "Liked Songs"
+			case m.spotifyCategory == 1:
+				contentType, title = "spotify-playlists", "Playlists"
+			case m.spotifyCategory == 2:
+				contentType, title = "spotify-albums", "Albums"
+			}
+
+			activeListLen := 0
+			switch contentType {
+			case "spotify-playlists":
+				activeListLen = len(m.spotifyPlaylists)
+			case "spotify-albums":
+				activeListLen = len(m.spotifyAlbums)
+			default:
+				activeListLen = len(m.spotifyItems)
+			}
+
+			contentOffset := 0
+			if activeListLen > trackVis {
+				off := m.spotifyScroll
+				if off > activeListLen-trackVis {
+					off = activeListLen - trackVis
+				}
+				if off < 0 {
+					off = 0
+				}
+				if contentType == "spotify-playlists" {
+					playlistSlice = m.spotifyPlaylists[off : off+trackVis]
+				} else if contentType == "spotify-albums" {
+					albumSlice = m.spotifyAlbums[off : off+trackVis]
+				} else {
+					trackSlice = m.spotifyItems[off : off+trackVis]
+				}
+				contentOffset = off
+			} else {
+				switch contentType {
+				case "spotify-playlists":
+					playlistSlice = m.spotifyPlaylists
+				case "spotify-albums":
+					albumSlice = m.spotifyAlbums
+				default:
+					trackSlice = m.spotifyItems
+				}
+			}
+
+			m.tracksPanel.SetData(components.TracksData{
+				Entries:          nil,
+				SpotifyTracks:    trackSlice,
+				SpotifyPlaylists: playlistSlice,
+				SpotifyAlbums:    albumSlice,
+				HideAlbum:        m.spotifyDrillType == "album",
+				ContentType:      contentType,
+				Title:            title,
+				PlayingPath:      "",
+				Cursor:           m.spotifyContentCursor,
+				Offset:           contentOffset,
+				Total:            m.spotifyTotal,
+				Active:           m.active == "tracks",
+				Height:           mainHeight,
+				Width:            rightWidth,
+				SearchMode:       false,
+				Loading:          m.spotifyLoading,
+			})
+		}
+	} else {
+		fileEntries := m.fileEntries
+		if fileEntries == nil {
+			fileEntries = m.trackFileEntries()
+		}
+		if m.active == "tracks" && m.searchMode && len(m.searchIdx) > 0 {
+			filtered := make([]types.Entry, len(m.searchIdx))
+			for i, idx := range m.searchIdx {
+				filtered[i] = fileEntries[idx]
+			}
+			fileEntries = filtered
+		}
+		fileSlice := fileEntries
+		fileOffset := 0
+		trackVis := m.trackVis()
+		if len(fileEntries) > trackVis {
+			off := m.tracksOffset
+			if off > len(fileEntries)-trackVis {
+				off = len(fileEntries) - trackVis
+			}
+			if off < 0 {
+				off = 0
+			}
+			fileSlice = fileEntries[off : off+trackVis]
+			fileOffset = off
+		}
+		m.tracksPanel.SetData(components.TracksData{
+			Entries:     fileSlice,
+			PlayingPath: playingTrack.Path,
+			Cursor:      m.tracksCursor,
+			Offset:      fileOffset,
+			Total:       len(fileEntries),
+			Active:      m.active == "tracks",
+			Height:      mainHeight,
+			Width:       rightWidth,
+			SearchMode:  m.searchMode && m.active == "tracks",
+			SearchQuery: m.searchQuery,
+			SubdirCount: m.subdirCount,
+		})
+	}
 
 	trackName := playingTrack.Title
 	if trackName == "" {
@@ -1339,7 +1625,7 @@ func (m model) buildMainView() string {
 		CoverArt:  playingTrack.CoverArt,
 	})
 
-	m.top.SetTrackCount(m.browser.TrackCount())
+	m.top.SetTrackCount(m.browser.TrackCount(), m.source)
 
 	leftCol := lipgloss.JoinVertical(lipgloss.Left,
 		m.libraryPanel.View(),
@@ -1351,11 +1637,6 @@ func (m model) buildMainView() string {
 		m.top.View(topHeight, m.width),
 		lipgloss.JoinHorizontal(lipgloss.Top, leftCol, m.tracksPanel.View()),
 		m.footer.View(),
-		lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6C7086")).
-			Width(m.width).
-			Align(lipgloss.Right).
-			Render("?  help"),
 	)
 
 	return s

@@ -30,6 +30,7 @@ func (cl *Client) GetUserProfile() (*UserProfile, error) {
 	return &profile, nil
 }
 
+// / Liked
 func (cl *Client) GetSavedTracks(limit, offset int) (*PagingObject[SavedTrack], error) {
 	url := baseURL + "/v1/me/tracks?limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset)
 	body, err := cl.doRequest(http.MethodGet, url, nil)
@@ -70,7 +71,8 @@ func (cl *Client) GetPlaylists(limit, offset int) (*PagingObject[SpotifyPlaylist
 }
 
 func (cl *Client) GetPlaylistTracks(playlistID string, limit, offset int) (*PagingObject[PlaylistTrackItem], error) {
-	url := baseURL + "/v1/playlists/" + playlistID + "/tracks?limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset)
+	// /tracks is deprecated and can return 403; /items is the current endpoint.
+	url := baseURL + "/v1/playlists/" + playlistID + "/items?limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset)
 	body, err := cl.doRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -78,6 +80,19 @@ func (cl *Client) GetPlaylistTracks(playlistID string, limit, offset int) (*Pagi
 	var result PagingObject[PlaylistTrackItem]
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse playlist tracks: %w", err)
+	}
+	return &result, nil
+}
+
+func (cl *Client) GetAlbumTracks(albumID string, limit, offset int) (*PagingObject[SpotifyTrack], error) {
+	url := baseURL + "/v1/albums/" + albumID + "/tracks?limit=" + strconv.Itoa(limit) + "&offset=" + strconv.Itoa(offset)
+	body, err := cl.doRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result PagingObject[SpotifyTrack]
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse album tracks: %w", err)
 	}
 	return &result, nil
 }
