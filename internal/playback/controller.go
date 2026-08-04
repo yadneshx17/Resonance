@@ -285,6 +285,14 @@ func (c *Controller) CurrentTrack() types.Track {
 	return c.current
 }
 
+// SetCurrentCover stores fetched album-art bytes on the currently playing
+// track so the footer can render it.
+func (c *Controller) SetCurrentCover(data []byte) {
+	if c.current.Source == types.Spotify {
+		c.current.CoverArt = data
+	}
+}
+
 func (c *Controller) CurrentIsSpotify() bool {
 	return c.current.Source == types.Spotify
 }
