@@ -84,3 +84,19 @@ type SavedTrack struct {
 type SavedAlbum struct {
 	Album SpotifyAlbum `json:"album"`
 }
+
+// Playback / Connect
+type SpotifyDevice struct {
+	ID        string `json:"id"`
+	IsActive  bool   `json:"is_active"`
+	IsPrivate bool   `json:"is_private"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+}
+
+type PlayerState struct {
+	Device     SpotifyDevice `json:"device"`
+	IsPlaying  bool          `json:"is_playing"`
+	ProgressMs int           `json:"progress_ms"`
+	Item       *SpotifyTrack `json:"item"`
+}

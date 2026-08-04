@@ -1,10 +1,12 @@
 package spotify
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 )
 
@@ -13,6 +15,9 @@ type Client struct {
 }
 
 const baseURL = "https://api.spotify.com"
+
+// refreshToken is a package var so tests can stub out the network call.
+var refreshToken = RefreshAccessToken
 
 func NewClient(c *Credentials) *Client {
 	return &Client{creds: c}
@@ -97,12 +102,97 @@ func (cl *Client) GetAlbumTracks(albumID string, limit, offset int) (*PagingObje
 	return &result, nil
 }
 
-func (cl *Client) doRequest(method, url string, body io.Reader) ([]byte, error) {
-	req, err := http.NewRequest(method, url, body)
+// --- Playback (Spotify Connect) ---
+
+func (cl *Client) GetPlaybackState() (*PlayerState, error) {
+	body, err := cl.doRequest(http.MethodGet, baseURL+"/v1/me/player", nil)
+	if err != nil {
+		return nil, err
+	}
+	// 204 No Content means nothing is playing / no active device.
+	if len(bytes.TrimSpace(body)) == 0 {
+		return nil, nil
+	}
+	var state PlayerState
+	if err := json.Unmarshal(body, &state); err != nil {
+		return nil, fmt.Errorf("failed to parse player state: %w", err)
+	}
+	return &state, nil
+}
+
+type devicesResponse struct {
+	Devices []SpotifyDevice `json:"devices"`
+}
+
+func (cl *Client) GetAvailableDevices() ([]SpotifyDevice, error) {
+	body, err := cl.doRequest(http.MethodGet, baseURL+"/v1/me/player/devices", nil)
+	if err != nil {
+		return nil, err
+	}
+	var resp devicesResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse devices: %w", err)
+	}
+	return resp.Devices, nil
+}
+
+// PlayURI starts playback of a single track on the given device.
+func (cl *Client) PlayURI(deviceID, uri string, positionMs int) error {
+	payload := map[string]any{
+		"uris":        []string{uri},
+		"position_ms": positionMs,
+	}
+	return cl.doJSON(http.MethodPut, baseURL+"/v1/me/player/play?device_id="+url.QueryEscape(deviceID), payload)
+}
+
+func (cl *Client) ResumePlayback(deviceID string) error {
+	return cl.doJSON(http.MethodPut, baseURL+"/v1/me/player/play?device_id="+url.QueryEscape(deviceID), nil)
+}
+
+func (cl *Client) PausePlayback(deviceID string) error {
+	return cl.doJSON(http.MethodPut, baseURL+"/v1/me/player/pause?device_id="+url.QueryEscape(deviceID), nil)
+}
+
+func (cl *Client) SeekPlayback(deviceID string, positionMs int) error {
+	u := baseURL + "/v1/me/player/seek?device_id=" + url.QueryEscape(deviceID) + "&position_ms=" + strconv.Itoa(positionMs)
+	return cl.doJSON(http.MethodPut, u, nil)
+}
+
+func (cl *Client) SetDeviceVolume(deviceID string, pct int) error {
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	u := baseURL + "/v1/me/player/volume?device_id=" + url.QueryEscape(deviceID) + "&volume_percent=" + strconv.Itoa(pct)
+	return cl.doJSON(http.MethodPut, u, nil)
+}
+
+func (cl *Client) doJSON(method, url string, payload any) error {
+	var body []byte
+	if payload != nil {
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("failed to marshal request body: %w", err)
+		}
+		body = b
+	}
+	_, err := cl.doRequest(method, url, body)
+	return err
+}
+
+// doRequest performs an API request. The body is passed as bytes so it can be
+// replayed unchanged if a 401 forces an access-token refresh before retrying.
+func (cl *Client) doRequest(method, url string, body []byte) ([]byte, error) {
+	req, err := http.NewRequest(method, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+cl.creds.AccessToken)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -117,25 +207,29 @@ func (cl *Client) doRequest(method, url string, body io.Reader) ([]byte, error) 
 
 	// auto-refresh access token
 	if resp.StatusCode == http.StatusUnauthorized {
-		if err := RefreshAccessToken(cl.creds); err != nil {
+		if err := refreshToken(cl.creds); err != nil {
 			return nil, fmt.Errorf("token refresh failed: %w", err)
 		}
 		return cl.doRequestOnce(method, url, body)
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	// Playback endpoints reply 204 No Content on success.
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return nil, fmt.Errorf("request failed (%d): %s", resp.StatusCode, string(respBody))
 	}
 
 	return respBody, nil
 }
 
-func (cl *Client) doRequestOnce(method, url string, body io.Reader) ([]byte, error) {
-	req, err := http.NewRequest(method, url, body)
+func (cl *Client) doRequestOnce(method, url string, body []byte) ([]byte, error) {
+	req, err := http.NewRequest(method, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+cl.creds.AccessToken)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -148,7 +242,8 @@ func (cl *Client) doRequestOnce(method, url string, body io.Reader) ([]byte, err
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	// Playback endpoints reply 204 No Content on success.
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return nil, fmt.Errorf("request failed (%d): %s", resp.StatusCode, string(respBody))
 	}
 

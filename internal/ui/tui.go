@@ -36,24 +36,26 @@ const (
 )
 
 type model struct {
-	player       *playback.Player
-	queue        *playback.Queue
-	browser      *library.Browser
-	libCursor    int
-	tracksCursor int
-	queueCursor  int
-	libOffset    int
-	tracksOffset int
-	queueOffset  int
-	active       string
-	playingID    int
-	errMsg       string
-	height       int
-	width        int
-	tooSmall     bool
-	selectedDir  string
-	fileEntries  []types.Entry
-	subdirCount  int
+	player        *playback.Player
+	controller    *playback.Controller
+	queue         *playback.Queue
+	browser       *library.Browser
+	libCursor     int
+	tracksCursor  int
+	queueCursor   int
+	libOffset     int
+	tracksOffset  int
+	queueOffset   int
+	active        string
+	playingID     int
+	errMsg        string
+	spotPollCount int // throttle /v1/me/player polls to every 5th tick
+	height        int
+	width         int
+	tooSmall      bool
+	selectedDir   string
+	fileEntries   []types.Entry
+	subdirCount   int
 
 	// Setup
 	setup      bool
@@ -161,6 +163,10 @@ type spotifyErrorMsg struct {
 	err string
 }
 
+type spotifyPollMsg struct {
+	state *spotify.PlayerState
+}
+
 func Run() {
 	m := model{
 		player:            playback.NewPlayer(),
@@ -204,6 +210,8 @@ func Run() {
 		m.spotifyClient = spotify.NewClient(cred)
 		m.spotifyLoggedIn = true
 	}
+
+	m.controller = playback.NewController(m.player, m.spotifyClient)
 
 	p := tea.NewProgram(m)
 	if _, err := p.Run(); err != nil {
@@ -417,7 +425,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "?", "esc", "q":
 				m.showHelp = false
 			case "ctrl+c":
-				return m, tea.Quit
+				return m, m.quit()
 			}
 			return m, nil
 		}
@@ -456,7 +464,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sourceSwitch = false
 
 			case "ctrl+c":
-				return m, tea.Quit
+				return m, m.quit()
 			}
 			return m, nil
 		}
@@ -486,7 +494,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "q", "ctrl+c":
-			return m, tea.Quit
+			return m, m.quit()
 		case "tab":
 			switch m.active {
 			case "library":
@@ -712,9 +720,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if idx < len(entries) {
 					e := entries[idx]
-					m.playingID++
 					m.errMsg = ""
-					m.player.Stop()
 					m.queue.Clear()
 					track := types.Track{
 						Path:     e.Path,
@@ -729,21 +735,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.queue.SetCurrent(0)
 					m.queueCursor = 0
 					m.queueOffset = 0
-					if err := m.player.Load(track); err != nil {
-						m.errMsg = fmt.Sprintf("Error: %v", err)
-						return m, nil
-					}
-					m.player.Play()
-					return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
+					return m.playTrack(track)
 				}
 			} else if m.active == "queue" && m.queue.Len() > 0 {
 				idx := m.queueCursor
 				if m.searchMode && idx < len(m.searchIdx) {
 					idx = m.searchIdx[idx]
 				}
-				m.playingID++
 				m.errMsg = ""
-				m.player.Stop()
 				m.queue.SetCurrent(idx)
 				vis := m.queueVis()
 				if m.queueCursor < m.queueOffset {
@@ -753,24 +752,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				tracks := m.queue.List()
 				track := tracks[idx]
-				if err := m.player.Load(track); err != nil {
-					m.errMsg = fmt.Sprintf("Error: %v", err)
-					return m, nil
-				}
-				m.player.Play()
-				return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
+				return m.playTrack(track)
 			}
 		case " ", "space":
-			if m.player.State() == playback.Playing {
-				m.player.Pause()
-			} else if m.player.State() == playback.Paused {
-				m.player.Resume()
+			if m.controller.State() == playback.Playing {
+				m.controller.Pause()
+			} else if m.controller.State() == playback.Paused {
+				m.controller.Resume()
 			}
 		case "n":
 			if m.queue.Len() > 0 {
-				m.playingID++
-				m.errMsg = ""
-				m.player.Stop()
 				m.queueCursor = (m.queueCursor + 1) % m.queue.Len()
 				m.queue.SetCurrent(m.queueCursor)
 				vis := m.queueVis()
@@ -779,18 +770,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				tracks := m.queue.List()
 				track := tracks[m.queueCursor]
-				if err := m.player.Load(track); err != nil {
-					m.errMsg = fmt.Sprintf("Error: %v", err)
-					return m, nil
-				}
-				m.player.Play()
-				return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
+				return m.playTrack(track)
 			}
 		case "p":
 			if m.queue.Len() > 0 {
-				m.playingID++
-				m.errMsg = ""
-				m.player.Stop()
 				m.queueCursor--
 				if m.queueCursor < 0 {
 					m.queueCursor = m.queue.Len() - 1
@@ -801,22 +784,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				tracks := m.queue.List()
 				track := tracks[m.queueCursor]
-				if err := m.player.Load(track); err != nil {
-					m.errMsg = fmt.Sprintf("Error: %v", err)
-					return m, nil
-				}
-				m.player.Play()
-				return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
+				return m.playTrack(track)
 			}
 		case "[":
-			m.player.SetVolume(-0.1)
+			m.controller.SetVolume(-0.1)
 		case "]":
-			m.player.SetVolume(0.1)
+			m.controller.SetVolume(0.1)
 		case "m":
-			if m.player.IsMuted() {
-				m.player.Unmute()
+			if m.controller.IsMuted() {
+				m.controller.Unmute()
 			} else {
-				m.player.Mute()
+				m.controller.Mute()
 			}
 		case "/":
 			if !m.searchMode {
@@ -832,24 +810,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "<":
-			if m.player.State() != playback.Stopped {
-				pos := m.player.Position()
-				dur := m.player.Duration()
+			if m.controller.State() != playback.Stopped {
+				pos := m.controller.Position()
+				dur := m.controller.Duration()
 				newPos := pos - 5*time.Second
 				if newPos < 0 {
 					newPos = dur
 				}
-				m.player.Seek(newPos)
+				m.controller.Seek(newPos)
 			}
 		case ">":
-			if m.player.State() != playback.Stopped {
-				pos := m.player.Position()
-				dur := m.player.Duration()
+			if m.controller.State() != playback.Stopped {
+				pos := m.controller.Position()
+				dur := m.controller.Duration()
 				newPos := pos + 5*time.Second
 				if newPos > dur {
 					newPos = dur
 				}
-				m.player.Seek(newPos)
+				m.controller.Seek(newPos)
 			}
 		case "?":
 			m.showHelp = !m.showHelp
@@ -860,7 +838,50 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tickMsg:
-		return m, tick()
+		// Poll the Spotify device at most every 5s and only while a track is
+		// actually playing. Polling every second (and polling forever while
+		// idle) exhausted Spotify's playback quota -> 429 -> tracks won't play.
+		cmds := []tea.Cmd{tick()}
+		if m.controller.CurrentIsSpotify() && m.spotifyClient != nil && m.controller.State() == playback.Playing {
+			if m.spotPollCount <= 0 {
+				m.spotPollCount = 4
+				cmds = append(cmds, spotifyPollState(m.spotifyClient))
+			} else {
+				m.spotPollCount--
+			}
+		}
+		return m, tea.Batch(cmds...)
+
+	case spotifyPollMsg:
+		if !m.controller.CurrentIsSpotify() {
+			return m, nil
+		}
+		// A nil state means 204 No Content: nothing is playing on the device,
+		// which is what a finished single-track context looks like.
+		ended := msg.state == nil
+		if msg.state != nil {
+			pos := time.Duration(msg.state.ProgressMs) * time.Millisecond
+			dur := time.Duration(0)
+			if msg.state.Item != nil {
+				dur = time.Duration(msg.state.Item.DurationMs) * time.Millisecond
+			}
+			m.controller.UpdateSpotifySnapshot(pos, dur, msg.state.IsPlaying)
+			ended = !msg.state.IsPlaying
+		}
+		// The device stopped on its own (track finished) while we expected
+		// playback -> advance to the next queue track. A grace period avoids
+		// advancing while the device is still starting the track.
+		if ended && m.controller.State() == playback.Playing && m.controller.SpotGracePassed(3*time.Second) {
+			cmd := m.advanceToNext()
+			if cmd == nil {
+				// Nothing left in the queue: go idle so polling stops
+				// instead of hammering the API forever.
+				m.controller.Stop()
+				return m, nil
+			}
+			return m, cmd
+		}
+		return m, nil
 
 	case songEndedMsg:
 		if msg.id != m.playingID {
@@ -869,19 +890,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.queue.Len() == 0 {
 			return m, nil
 		}
-		m.playingID++
-		m.queueCursor = (m.queueCursor + 1) % m.queue.Len()
-		m.queue.SetCurrent(m.queueCursor)
-		vis := m.queueVis()
-		if m.queueCursor >= m.queueOffset+vis {
-			m.queueOffset = m.queueCursor - vis + 1
-		}
-
-		tracks := m.queue.List()
-		track := tracks[m.queueCursor]
-		m.player.Load(track)
-		m.player.Play()
-		return m, tea.Batch(waitForSongEnd(m.player, m.playingID), tick())
+		return m, m.advanceToNext()
 
 	case spotifyTracksMsg:
 		m.spotifyLoading = false
@@ -978,7 +987,7 @@ func (m model) handleSetupKey(msg tea.KeyPressMsg) (model, tea.Cmd) {
 	case setupWelcome:
 		switch msg.String() {
 		case "q", "ctrl+c":
-			return m, tea.Quit
+			return m, m.quit()
 		case "1":
 			home, err := os.UserHomeDir()
 			if err != nil {
@@ -1150,10 +1159,80 @@ func waitForSongEnd(player *playback.Player, id int) tea.Cmd {
 	}
 }
 
+func spotifyPollState(cl *spotify.Client) tea.Cmd {
+	return func() tea.Msg {
+		state, err := cl.GetPlaybackState()
+		if err != nil {
+			return nil
+		}
+		return spotifyPollMsg{state: state}
+	}
+}
+
+// playbackCmds returns the tea.Cmd batch for whatever the controller just
+// started playing: Spotify tracks are polled (there is no local stream to
+// wait on), local tracks block on the beep player finishing.
+func (m model) playbackCmds() tea.Cmd {
+	var cmds []tea.Cmd
+	if m.controller.CurrentIsSpotify() {
+		cmds = append(cmds, tick())
+	} else {
+		cmds = append(cmds, waitForSongEnd(m.player, m.playingID), tick())
+	}
+	return tea.Batch(cmds...)
+}
+
+// playTrack starts playback of a track through the controller.
+func (m model) playTrack(track types.Track) (tea.Model, tea.Cmd) {
+	m.playingID++
+	m.errMsg = ""
+	if track.Source == types.Spotify {
+		m.spotPollCount = 0
+	}
+	if err := m.controller.PlayTrack(track); err != nil {
+		m.errMsg = fmt.Sprintf("Error: %v", err)
+		return m, nil
+	}
+	return m, m.playbackCmds()
+}
+
+// advanceToNext moves the queue to the next track and starts it.
+func (m model) advanceToNext() tea.Cmd {
+	if m.queue.Len() == 0 {
+		return nil
+	}
+	m.queueCursor = (m.queueCursor + 1) % m.queue.Len()
+	m.queue.SetCurrent(m.queueCursor)
+	vis := m.queueVis()
+	if m.queueCursor >= m.queueOffset+vis {
+		m.queueOffset = m.queueCursor - vis + 1
+	}
+
+	tracks := m.queue.List()
+	track := tracks[m.queueCursor]
+	m.playingID++
+	m.errMsg = ""
+	if track.Source == types.Spotify {
+		m.spotPollCount = 0
+	}
+	if err := m.controller.PlayTrack(track); err != nil {
+		m.errMsg = fmt.Sprintf("Error: %v", err)
+		return nil
+	}
+	return m.playbackCmds()
+}
+
 func tick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
+}
+
+func (m model) quit() tea.Cmd {
+	if m.controller != nil {
+		m.controller.PauseSpotify()
+	}
+	return tea.Quit
 }
 
 func (m model) setupView() tea.View {
@@ -1439,7 +1518,7 @@ func (m model) buildMainView() string {
 	m.queuePanel.SetData(components.QueueData{
 		Tracks:      queueSlice,
 		PlayingIdx:  playIdx,
-		Playing:     m.player.State() != playback.Stopped,
+		Playing:     m.controller.State() != playback.Stopped,
 		Cursor:      m.queueCursor,
 		Offset:      queueOffset,
 		Total:       len(tracks),
@@ -1451,7 +1530,7 @@ func (m model) buildMainView() string {
 	})
 
 	// tracks panel (right side)
-	playingTrack := m.player.CurrentTrack()
+	playingTrack := m.controller.CurrentTrack()
 
 	if m.source == "spotify" {
 		if m.spotifyErr != "" {
@@ -1601,11 +1680,11 @@ func (m model) buildMainView() string {
 	}
 
 	var stateIcon string
-	switch m.player.State() {
+	switch m.controller.State() {
 	case playback.Playing:
-		stateIcon = playingIconStyle.Render(common.Play)
-	case playback.Paused:
 		stateIcon = pausedIconStyle.Render(common.Pause)
+	case playback.Paused:
+		stateIcon = playingIconStyle.Render(common.Play)
 	default:
 		stateIcon = common.MusicNote2
 	}
@@ -1616,10 +1695,10 @@ func (m model) buildMainView() string {
 		Album:     album,
 		Artist:    artist,
 		StateIcon: stateIcon,
-		Position:  m.player.Position(),
-		Duration:  m.player.Duration(),
-		VolLevel:  m.player.Volume(),
-		Muted:     m.player.IsMuted(),
+		Position:  m.controller.Position(),
+		Duration:  m.controller.Duration(),
+		VolLevel:  m.controller.Volume(),
+		Muted:     m.controller.IsMuted(),
 		Height:    footerHeight,
 		Width:     m.width,
 		CoverArt:  playingTrack.CoverArt,

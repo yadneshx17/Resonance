@@ -15,17 +15,17 @@ import (
 
 // Stores the loaded audio and current state
 type Player struct {
-	streamer  beep.StreamSeekCloser // decoded audio + ( Close, Seek, Position )
-	format    beep.Format           // sample rate info
-	ctrl      *beep.Ctrl            // enables pause/resume
-	volume    *effects.Volume       // volume control=
-	state     PlaybackState
-	track     *types.Track
-	done      chan struct{}
-	closeOnce sync.Once // fixes: panic closing closed channel
-	volLevel  float64   // current volume level (-3 to 3)
-	muted     bool
-	prevVol   float64 // volume before mute
+	streamer beep.StreamSeekCloser // decoded audio + ( Close, Seek, Position )
+	format   beep.Format           // sample rate info
+	ctrl     *beep.Ctrl            // enables pause/resume
+	volume   *effects.Volume       // volume control=
+	state    PlaybackState
+	track    *types.Track
+	done     chan struct{}
+	doneOnce *sync.Once // guards closing done (Stop or natural end)
+	volLevel float64    // current volume level (-3 to 3)
+	muted    bool
+	prevVol  float64 // volume before mute
 }
 
 type AudioEngine interface {
@@ -138,12 +138,13 @@ func (p *Player) Play() error {
 	// Volume adjusts the volume of the wrapped Streamer in a human-natural way
 	p.volume = &effects.Volume{Streamer: p.ctrl, Base: 2, Volume: p.volLevel, Silent: p.muted}
 
-	p.closeOnce = sync.Once{}
 	p.done = make(chan struct{})
+	p.doneOnce = &sync.Once{}
 
 	done := p.done
+	once := p.doneOnce
 	speaker.Play(beep.Seq(p.volume, beep.Callback(func() {
-		close(done)
+		once.Do(func() { close(done) })
 	})))
 
 	p.state = Playing
@@ -175,11 +176,9 @@ func (p *Player) Stop() error {
 		p.streamer.Seek(0) // reset position
 	}
 
-	p.closeOnce.Do(func() {
-		if p.done != nil {
-			close(p.done)
-		}
-	})
+	if p.doneOnce != nil && p.done != nil {
+		p.doneOnce.Do(func() { close(p.done) })
+	}
 	return nil
 }
 

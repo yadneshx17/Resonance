@@ -71,4 +71,6 @@ var (
 	// Keys
 	Confirm = "↵" // Printable Rune : "↵"
 	Cancel  = "⎋" // Printable Rune : "⎋"
+
+	Cloud = "☁"
 )

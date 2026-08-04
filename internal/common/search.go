@@ -13,7 +13,7 @@ func FuzzyMatch(query, s string) bool {
 	for _, ch := range s {
 		if queryIdx < len(query) && byte(ch) == query[queryIdx] {
 			queryIdx++
-		}	
+		}
 		for queryIdx < len(query) && query[queryIdx] == ' ' {
 			queryIdx++
 		}

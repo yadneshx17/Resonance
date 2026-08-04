@@ -71,7 +71,7 @@ func (q Queue) buildQueueBlock() string {
 	durWidth := 6
 	seqWidth := 3
 	prefixWidth := 3
-	nameMax := contentWidth - seqWidth - 1 - prefixWidth - 1 - durWidth
+	nameMax := contentWidth - seqWidth - 1 - prefixWidth - 1 - durWidth - 1 - 1
 	if nameMax < 1 {
 		nameMax = 1
 	}
@@ -102,8 +102,12 @@ func (q Queue) buildQueueBlock() string {
 		} else if q.active && q.cursor == idx {
 			prefix = common.Cursor + " "
 		}
+		badge := " " + common.MusicNote2
+		if t.Source == types.Spotify {
+			badge = common.Cloud
+		}
 		padded := fmt.Sprintf("%-*s", nameMax, name)
-		line := fmt.Sprintf("%s %s%s %s", seq, prefix, padded, durFmt)
+		line := fmt.Sprintf("%s %s%s %s %s", seq, prefix, padded, durFmt, badge)
 		if idx == q.playingIdx && q.playing {
 			line = common.PlayingTrackStyle.Render(line)
 		} else if q.active && q.cursor == idx {
