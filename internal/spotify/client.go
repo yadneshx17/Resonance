@@ -104,6 +104,20 @@ func (cl *Client) GetAlbumTracks(albumID string, limit, offset int) (*PagingObje
 
 // --- Playback (Spotify Connect) ---
 
+// GetImage downloads raw image bytes (album art) from a Spotify CDN URL.
+// Image hosts don't require auth, so this bypasses the token dance.
+func (cl *Client) GetImage(url string) ([]byte, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("image fetch failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("image fetch failed (%d)", resp.StatusCode)
+	}
+	return io.ReadAll(resp.Body)
+}
+
 func (cl *Client) GetPlaybackState() (*PlayerState, error) {
 	body, err := cl.doRequest(http.MethodGet, baseURL+"/v1/me/player", nil)
 	if err != nil {

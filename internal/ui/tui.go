@@ -167,6 +167,11 @@ type spotifyPollMsg struct {
 	state *spotify.PlayerState
 }
 
+type spotifyCoverMsg struct {
+	id   string
+	data []byte
+}
+
 func Run() {
 	m := model{
 		player:            playback.NewPlayer(),
@@ -883,6 +888,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case spotifyCoverMsg:
+		if !m.controller.CurrentIsSpotify() || m.controller.CurrentTrack().ID != msg.id {
+			return m, nil
+		}
+		m.controller.SetCurrentCover(msg.data)
+		return m, nil
+
 	case songEndedMsg:
 		if msg.id != m.playingID {
 			return m, nil
@@ -1169,6 +1181,22 @@ func spotifyPollState(cl *spotify.Client) tea.Cmd {
 	}
 }
 
+// spotifyCoverArt downloads the album art for a Spotify track. The bytes are
+// attached to the track only after playback starts, so list loads don't block
+// on N parallel image fetches.
+func spotifyCoverArt(cl *spotify.Client, track types.Track) tea.Cmd {
+	return func() tea.Msg {
+		if cl == nil || track.CoverArtURL == "" {
+			return nil
+		}
+		data, err := cl.GetImage(track.CoverArtURL)
+		if err != nil {
+			return nil
+		}
+		return spotifyCoverMsg{id: track.ID, data: data}
+	}
+}
+
 // playbackCmds returns the tea.Cmd batch for whatever the controller just
 // started playing: Spotify tracks are polled (there is no local stream to
 // wait on), local tracks block on the beep player finishing.
@@ -1176,6 +1204,10 @@ func (m model) playbackCmds() tea.Cmd {
 	var cmds []tea.Cmd
 	if m.controller.CurrentIsSpotify() {
 		cmds = append(cmds, tick())
+		track := m.controller.CurrentTrack()
+		if m.spotifyClient != nil && track.CoverArtURL != "" {
+			cmds = append(cmds, spotifyCoverArt(m.spotifyClient, track))
+		}
 	} else {
 		cmds = append(cmds, waitForSongEnd(m.player, m.playingID), tick())
 	}

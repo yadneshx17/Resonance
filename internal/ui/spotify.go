@@ -335,12 +335,17 @@ func spotifyTrackToTrack(st spotify.SpotifyTrack) types.Track {
 	if st.Album.Name != "" {
 		album = st.Album.Name
 	}
+	coverURL := ""
+	if len(st.Album.Images) > 0 {
+		coverURL = st.Album.Images[0].URL
+	}
 	return types.Track{
-		ID:       st.ID,
-		Title:    st.Name,
-		Artist:   artist,
-		Album:    album,
-		Source:   types.Spotify,
-		Duration: time.Duration(st.DurationMs) * time.Millisecond,
+		ID:          st.ID,
+		Title:       st.Name,
+		Artist:      artist,
+		Album:       album,
+		CoverArtURL: coverURL,
+		Source:      types.Spotify,
+		Duration:    time.Duration(st.DurationMs) * time.Millisecond,
 	}
 }
