@@ -1791,6 +1791,7 @@ func (m model) helpBox() string {
 			{"< , >", "Seek -5s / +5s"},
 		}},
 		{"General", [][2]string{
+			{"Ctrl+S", "Switch source (Local / Spotify)"},
 			{"q / Ctrl+C", "Quit"},
 			{"esc", "Close"},
 			{"?", "Close this help"},
