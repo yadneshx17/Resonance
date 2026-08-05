@@ -1,11 +1,13 @@
 # Resonance
 
 A terminal-native music player with unified local and Spotify playback.
+
 ---
 
 ## Overview
 
 Resonance is a keyboard-driven terminal music player built in Go, featuring seamless local and Spotify playback through a unified queue. Designed with a modular architecture, it combines Bubble Tea, Beep, and the Spotify Web API to deliver a fast, terminal-native listening experience.
+
 ---
 
 ## Screenshots
@@ -225,7 +227,7 @@ Local and Spotify playback are both usable. The local library browses MP3s with 
 
 ---
 
-## Roadmap
+## Vision
 
 These features are planned but not yet implemented:
 
